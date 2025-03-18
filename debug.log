@@ -1,0 +1,67 @@
+Internal Server Error: /admin/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\contrib\admin\sites.py", line 260, in wrapper
+    return self.admin_view(view, cacheable)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\utils\decorators.py", line 188, in _view_wrapper
+    result = _process_exception(request, e)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\utils\decorators.py", line 186, in _view_wrapper
+    response = view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\views\decorators\cache.py", line 80, in _view_wrapper
+    response = view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\contrib\admin\sites.py", line 241, in inner
+    return view(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\contrib\admin\sites.py", line 557, in index
+    app_list = self.get_app_list(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\contrib\admin\sites.py", line 541, in get_app_list
+    app_dict = self._build_app_dict(request, app_label)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\contrib\admin\sites.py", line 487, in _build_app_dict
+    perms = model_admin.get_model_perms(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\contrib\admin\options.py", line 781, in get_model_perms
+    "add": self.has_add_permission(request),
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\contrib\admin\options.py", line 574, in has_add_permission
+    return request.user.has_perm("%s.%s" % (opts.app_label, codename))
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\users\models.py", line 59, in has_perm
+    return self.is_admin
+           ^^^^^^^^^^^^^
+AttributeError: 'User' object has no attribute 'is_admin'
+"GET /admin/ HTTP/1.1" 500 121027
+Invalid HTTP_HOST header: 'localhost:8000'. You may need to add 'localhost' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: 'localhost:8000'. You may need to add 'localhost' to ALLOWED_HOSTS.
+Invalid HTTP_HOST header: 'localhost:8000'. You may need to add 'localhost' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: 'localhost:8000'. You may need to add 'localhost' to ALLOWED_HOSTS.
+Invalid HTTP_HOST header: 'localhost:8000'. You may need to add 'localhost' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\Django_project\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: 'localhost:8000'. You may need to add 'localhost' to ALLOWED_HOSTS.
