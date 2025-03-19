@@ -1,6 +1,6 @@
-# users/apps.py
+# dictionary/apps.py
 from django.apps import AppConfig
 
-class UsersConfig(AppConfig):
+class DictionaryConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'users'
+    name = 'dictionary'
