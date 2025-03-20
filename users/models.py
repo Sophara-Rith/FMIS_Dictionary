@@ -4,8 +4,8 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 
 class UserManager(BaseUserManager):
     def create_user(self, username, email, password=None):
-        if not email:
-            raise ValueError('Users must have an email address')
+        if not username:
+            raise ValueError('Users must have an username')
 
         user = self.model(
             username=username,
@@ -34,7 +34,7 @@ class User(AbstractBaseUser):
     )
 
     username = models.CharField(max_length=150, unique=True)
-    email = models.EmailField(unique=True)
+    email = models.EmailField(unique=True, blank=True)
     first_name = models.CharField(max_length=100, null=True, blank=True)
     last_name = models.CharField(max_length=100, null=True, blank=True)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
@@ -50,7 +50,7 @@ class User(AbstractBaseUser):
     objects = UserManager()
 
     USERNAME_FIELD = 'username'
-    REQUIRED_FIELDS = ['email']
+    #REQUIRED_FIELDS = ['email']
 
     def __str__(self):
         return self.username

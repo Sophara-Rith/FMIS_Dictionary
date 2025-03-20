@@ -50,6 +50,7 @@ class UserSerializer(serializers.ModelSerializer):
         # Update other fields
         instance.first_name = validated_data.get('first_name', instance.first_name)
         instance.last_name = validated_data.get('last_name', instance.last_name)
+        instance.email = validated_data.get('email', instance.email)
         instance.phone_number = validated_data.get('phone_number', instance.phone_number)
 
         instance.save()
