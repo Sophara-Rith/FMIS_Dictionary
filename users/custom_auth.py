@@ -17,7 +17,7 @@ class ExpiringTokenAuthentication(TokenAuthentication):
             raise AuthenticationFailed('User inactive or deleted')
 
         # Calculate token expiration time
-        token_expiry_time = getattr(settings, 'TOKEN_EXPIRE_TIME', 90)  # 1.5 hours = 90 minutes
+        token_expiry_time = getattr(settings, 'TOKEN_EXPIRE_TIME', 90)  # 90 minutes
 
         # Check if token has been inactive for too long
         if token.created < timezone.now() - timezone.timedelta(minutes=token_expiry_time):
