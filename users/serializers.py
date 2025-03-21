@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
-from django.utils import timezone
+from django.db.models import Q
 from .models import User
 
 class UserSerializer(serializers.ModelSerializer):
@@ -8,76 +8,60 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'password',
-            'first_name', 'last_name', 'role',
-            'is_suspended', 'date_joined'
+            'first_name', 'last_name', 'role'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
-            'id': {'read_only': True},
-            'is_suspended': {'read_only': True},
-            'date_joined': {'read_only': True}
+            'id': {'read_only': True}
         }
 
+    def validate_email(self, value):
+        # Ensure email is from @fmis.gov.kh domain
+        if not value.endswith('@fmis.gov.kh'):
+            raise serializers.ValidationError("Email must be from @fmis.gov.kh domain")
+        return value
+
     def create(self, validated_data):
-        # Only admins can specify role
-        role = validated_data.pop('role', 'USER')
+        # Extract first and last name from email if not provided
+        email = validated_data['email']
+        email_parts = email.split('@')[0].split('.')
 
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password'],
-            role=role
-        )
+        if len(email_parts) >= 2:
+            validated_data['last_name'] = email_parts[0].capitalize()
+            validated_data['first_name'] = email_parts[1].capitalize()
 
-        # Optional fields
-        user.first_name = validated_data.get('first_name', '')
-        user.last_name = validated_data.get('last_name', '')
-        user.save()
+        # Generate username from email
+        username = f"{email_parts[0]}_{email_parts[1]}" if len(email_parts) >= 2 else email.split('@')[0]
+        validated_data['username'] = username
 
-        return user
+        return User.objects.create_user(**validated_data)
 
 class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
+    login_input = serializers.CharField()  # Can be username or email
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        username = data.get('username')
+        login_input = data.get('login_input')
         password = data.get('password')
 
-        if username and password:
-            # Fetch the user
+        if login_input and password:
+            # Try to authenticate with either username or email
+            user = None
             try:
-                user = User.objects.get(username=username)
+                # First, try to find user by username or email
+                user = User.objects.filter(
+                    Q(username=login_input) | Q(email=login_input)
+                ).first()
             except User.DoesNotExist:
-                raise serializers.ValidationError("User not found.")
+                pass
 
-            # Check if login attempts are allowed
-            if not user.can_attempt_login():
-                if user.is_suspended:
-                    raise serializers.ValidationError("Account is suspended due to multiple failed login attempts.")
-                else:
-                    raise serializers.ValidationError("Too many failed login attempts. Please try again later.")
+            if user:
+                # Authenticate the user
+                auth_user = authenticate(username=user.username, password=password)
+                if auth_user:
+                    data['user'] = auth_user
+                    return data
 
-            # Authenticate user
-            auth_user = authenticate(username=username, password=password)
-
-            if auth_user:
-                # Successful login - reset attempts
-                user.reset_login_attempts()
-                data['user'] = auth_user
-                return data
-            else:
-                # Failed login attempt
-                user.increment_login_attempts()
-                raise serializers.ValidationError("Unable to login with provided credentials.")
+            raise serializers.ValidationError("Unable to login with provided credentials")
         else:
-            raise serializers.ValidationError("Must include 'username' and 'password'.")
-
-class UserManagementSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = [
-            'id', 'username', 'email', 'first_name',
-            'last_name', 'role', 'is_suspended'
-        ]
-        read_only_fields = ['id']
+            raise serializers.ValidationError("Must include login input and password")

@@ -128,12 +128,16 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
 }
 
+<<<<<<< HEAD
+CORS_ALLOWED_ORIGINS =os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
+=======
 # CORS Configuration
 def clean_cors_origins(origins_string):
     origins = origins_string.split(',')
     return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
 
 CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
+>>>>>>> main
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'
@@ -151,15 +155,15 @@ LOGGING = {
     'disable_existing_loggers': False,
     'handlers': {
         'file': {
-            'level': 'WARNING',
+            'level': 'ERROR',
             'class': 'logging.FileHandler',
-            'filename': 'security_logs.log',
+            'filename': 'debug.log',
         },
     },
     'loggers': {
-        'security': {
+        'django': {
             'handlers': ['file'],
-            'level': 'WARNING',
+            'level': 'ERROR',
             'propagate': True,
         },
     },
