@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("users", "0005_remove_user_phone_number_user_is_suspended_and_more"),
+        ("users", "0004_alter_user_email"),
     ]
 
     operations = [
