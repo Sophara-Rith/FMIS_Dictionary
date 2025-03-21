@@ -114,12 +114,7 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': os.getenv('BLACKLIST_AFTER_ROTATION', 'True')
 }
 
-def clean_cors_origins(origins_string):
-    # Remove any comments or whitespace
-    origins = origins_string.split(',')
-    return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
-
-CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
+CORS_ALLOWED_ORIGINS =os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
@@ -129,20 +124,21 @@ USE_TZ = True
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Logging Configuration
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'handlers': {
         'file': {
-            'level': 'WARNING',
+            'level': 'ERROR',
             'class': 'logging.FileHandler',
-            'filename': 'security_logs.log',
+            'filename': 'debug.log',
         },
     },
     'loggers': {
-        'security': {
+        'django': {
             'handlers': ['file'],
-            'level': 'WARNING',
+            'level': 'ERROR',
             'propagate': True,
         },
     },
