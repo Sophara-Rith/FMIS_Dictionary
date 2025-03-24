@@ -396,12 +396,6 @@ class UserListView(APIView):
         manual_parameters=[
 
         ],
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-
-            }
-        ),
         responses={
             200: openapi.Response(
                 description='User Updated Successfully',
