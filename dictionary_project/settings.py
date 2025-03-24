@@ -128,16 +128,25 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
 }
 
-<<<<<<< HEAD
 CORS_ALLOWED_ORIGINS =os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
-=======
+
 # CORS Configuration
 def clean_cors_origins(origins_string):
     origins = origins_string.split(',')
     return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
 
 CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
->>>>>>> main
+
+# Swagger config
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header'
+        }
+    }
+}
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'

@@ -4,39 +4,39 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
     TokenRefreshView,
+    TokenBlacklistView
 )
+from users.views import CustomTokenObtainPairView
 
-# Swagger/OpenAPI Schema Configuration
+# Swagger Schema View
 schema_view = get_schema_view(
    openapi.Info(
       title="Dictionary API",
       default_version='v1',
       description="Dictionary API Documentation",
-      terms_of_service="#",
-      contact=openapi.Contact(email="contact@example.com"),
-      license=openapi.License(name="Project License"),
+      terms_of_service="https://www.yourapp.com/terms/",
+      contact=openapi.Contact(email="contact@yourapp.com"),
+      license=openapi.License(name="Your Project License"),
    ),
    public=True,
    permission_classes=(permissions.AllowAny,),
 )
 
 urlpatterns = [
-    # Admin site
+    # Admin and other app routes
     path('admin/', admin.site.urls),
 
-    # User-related URLs
+    # User and Dictionary routes
     path('api/users/', include('users.urls')),
-
-    # Dictionary-related URLs
     path('api/dictionary/', include('dictionary.urls')),
 
-    # JWT Token URLs
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    # Token-related paths
+    path('api/token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/token/blacklist/', TokenBlacklistView.as_view(), name='token_blacklist'),
 
-    # Swagger/OpenAPI Documentation URLs
+    # Swagger documentation paths
     path('swagger<format>/', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

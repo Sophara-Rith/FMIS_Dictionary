@@ -7,7 +7,7 @@ from django.utils import timezone
 def validate_fmis_email(value):
     validate_email(value)
     if not value.endswith('@fmis.gov.kh'):
-        raise ValidationError('Email must be from @fmis.gov.kh domain')
+        raise ValidationError('Only FMIS email address is acceptant.')
 
 class UserManager(BaseUserManager):
     def create_user(self, username, email, password=None, first_name=None, last_name=None, role='USER'):
@@ -60,6 +60,7 @@ class User(AbstractBaseUser):
     first_name = models.CharField(max_length=100, null=True, blank=True)
     last_name = models.CharField(max_length=100, null=True, blank=True)
 
+    phone_number = models.CharField(max_length=20, null=True, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='USER')
 
     is_active = models.BooleanField(default=True)
@@ -68,6 +69,12 @@ class User(AbstractBaseUser):
 
     date_joined = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(null=True, blank=True)
+
+    is_suspended = models.BooleanField(default=False)
+    last_login_attempt = models.DateTimeField(null=True, blank=True)
+    login_attempts = models.IntegerField(default=0)
+    suspended_at = models.DateTimeField(null=True, blank=True)
+    suspension_reason = models.TextField(null=True, blank=True)
 
     objects = UserManager()
 

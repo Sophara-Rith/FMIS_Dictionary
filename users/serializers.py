@@ -1,67 +1,140 @@
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
-from django.db.models import Q
 from .models import User
+
+class LoginSerializer(serializers.Serializer):
+    """
+    Serializer for user login
+    """
+    username = serializers.CharField(
+        required=False,
+        help_text="Username for login (optional if email is provided)"
+    )
+    email = serializers.EmailField(
+        required=False,
+        help_text="Email for login (optional if username is provided)"
+    )
+    password = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="User password"
+    )
+
+    def validate(self, data):
+        if not (data.get('username') or data.get('email')):
+            raise serializers.ValidationError("Either username or email is required")
+        return data
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'password',
-            'first_name', 'last_name', 'role'
+            'role', 'phone_number'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
             'id': {'read_only': True}
         }
 
-    def validate_email(self, value):
-        # Ensure email is from @fmis.gov.kh domain
-        if not value.endswith('@fmis.gov.kh'):
-            raise serializers.ValidationError("Email must be from @fmis.gov.kh domain")
-        return value
+    def update(self, instance, validated_data):
+
+        request = self.context.get('request')
+
+        # Role update (admin only)
+        role = validated_data.get('role')
+        if role:
+            # Only allow role change for admin/superuser
+            if request.user.role not in ['ADMIN', 'SUPERUSER']:
+                raise serializers.ValidationError("Only admins can change user roles")
+            instance.role = role
+
+        email = validated_data.get('email')
+        if email:
+            instance.email = email
+
+        password = validated_data.get('password')
+        if password:
+            instance.set_password(password)
+
+        phone_number = validated_data.get('phone_number')
+        if phone_number:
+            instance.phone_number = phone_number
+
+        instance.save()
+        return instance
 
     def create(self, validated_data):
-        # Extract first and last name from email if not provided
-        email = validated_data['email']
-        email_parts = email.split('@')[0].split('.')
+        phone_number = validated_data.pop('phone_number', None)
 
-        if len(email_parts) >= 2:
-            validated_data['last_name'] = email_parts[0].capitalize()
-            validated_data['first_name'] = email_parts[1].capitalize()
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data['email'],
+            password=validated_data['password']
+        )
 
-        # Generate username from email
-        username = f"{email_parts[0]}_{email_parts[1]}" if len(email_parts) >= 2 else email.split('@')[0]
-        validated_data['username'] = username
+        if phone_number:
+            user.phone_number = phone_number
 
-        return User.objects.create_user(**validated_data)
+        user.save()
+        return user
 
-class LoginSerializer(serializers.Serializer):
-    login_input = serializers.CharField()  # Can be username or email
-    password = serializers.CharField(write_only=True)
+class UserManagementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'role',
+            'is_active',
+            'date_joined',
+            'last_login'
+        ]
+        read_only_fields = ['id', 'date_joined', 'last_login']
 
-    def validate(self, data):
-        login_input = data.get('login_input')
-        password = data.get('password')
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
-        if login_input and password:
-            # Try to authenticate with either username or email
-            user = None
+    username = serializers.CharField(required=False)
+    email = serializers.EmailField(required=False)
+    login_input = serializers.CharField(required=True)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.fields.pop('username', None)
+        self.fields['login_input'] = serializers.CharField(required=True)
+
+    def validate(self, attrs):
+
+        login_input = attrs.get('login_input')
+        password = attrs.get('password')
+
+        if not login_input or not password:
+            raise serializers.ValidationError("Must include 'login_input' and 'password'")
+
+        user = authenticate(username=login_input, password=password)
+
+        # If authentication fails, try with email
+        if not user:
             try:
-                # First, try to find user by username or email
-                user = User.objects.filter(
-                    Q(username=login_input) | Q(email=login_input)
-                ).first()
+                user = User.objects.get(email=login_input)
+
+                if user.check_password(password):
+                    user = authenticate(username=user.username, password=password)
             except User.DoesNotExist:
-                pass
+                user = None
 
-            if user:
-                # Authenticate the user
-                auth_user = authenticate(username=user.username, password=password)
-                if auth_user:
-                    data['user'] = auth_user
-                    return data
+        if not user:
+            raise serializers.ValidationError("Unable to log in with provided credentials")
 
-            raise serializers.ValidationError("Unable to login with provided credentials")
-        else:
-            raise serializers.ValidationError("Must include login input and password")
+        # Generate tokens using the authenticated user
+        refresh = self.get_token(user)
+
+        return {
+            'refresh': str(refresh),
+            'access': str(refresh.access_token)
+        }
