@@ -1,6 +1,8 @@
+# users/serializers.py
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
+import re
 from .models import User
 
 class LoginSerializer(serializers.Serializer):
@@ -49,78 +51,101 @@ class LoginSerializer(serializers.Serializer):
         data['user'] = user
         return data
 
+class PasswordValidator:
+    @staticmethod
+    def validate_password(password):
+        """
+        Validate password complexity:
+        - At least 8 characters long
+        - Contains at least 1 uppercase letter
+        - Contains at least 1 lowercase letter
+        - Contains at least 1 special character
+        - Contains at least 1 number
+        """
+        # Check length
+        if len(password) < 8:
+            raise serializers.ValidationError(
+                "Password must be at least 8 characters long."
+            )
+
+        # Check for at least 1 uppercase letter
+        if not re.search(r'[A-Z]', password):
+            raise serializers.ValidationError(
+                "Password must contain at least 1 uppercase letter."
+            )
+
+        # Check for at least 1 lowercase letter
+        if not re.search(r'[a-z]', password):
+            raise serializers.ValidationError(
+                "Password must contain at least 1 lowercase letter."
+            )
+
+        # Check for at least 1 special character
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+            raise serializers.ValidationError(
+                "Password must contain at least 1 special character (!@#$%^&*(),.?\":{}|<>)."
+            )
+
+        # Check for at least 1 number
+        if not re.search(r'\d', password):
+            raise serializers.ValidationError(
+                "Password must contain at least 1 number."
+            )
+
+        return password
+
 class UserSerializer(serializers.ModelSerializer):
-    """
-    Comprehensive User Serializer for CRUD operations
-    """
     class Meta:
         model = User
         fields = [
-            'id',
-            'username',
-            'email',
-            'password',
-            'first_name',
-            'last_name',
-            'role',
-            'phone_number',
-            'is_active',
-            'date_joined'
+            'id', 'username', 'email', 'password',
+            'role', 'phone_number'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
             'id': {'read_only': True},
-            'date_joined': {'read_only': True}
+            'phone_number': {'required': False}
         }
 
-    def create(self, validated_data):
+    def validate_password(self, password):
         """
-        Custom user creation with role and additional fields
+        Custom password validation during serializer validation
         """
-        # Default role to 'USER' if not provided
-        role = validated_data.pop('role', 'USER')
+        return PasswordValidator.validate_password(password)
 
-        # Create user with hashed password
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+
+        try:
+            PasswordValidator.validate_password(password)
+        except serializers.ValidationError as e:
+            raise serializers.ValidationError({'password': str(e)})
+
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password']
+            password=password,
+            phone_number=validated_data.get('phone_number')
         )
-
-        # Set additional fields
-        user.first_name = validated_data.get('first_name', '')
-        user.last_name = validated_data.get('last_name', '')
-        user.phone_number = validated_data.get('phone_number', '')
-        user.role = role
-        user.save()
-
         return user
 
     def update(self, instance, validated_data):
-        """
-        Custom user update with role and permission checks
-        """
-        # Context from the view to check permissions
-        request = self.context.get('request')
+        # Password update with validation
+        password = validated_data.get('password')
 
-        # Role update (admin only)
-        role = validated_data.get('role')
-        if role:
-            # Only allow role change for admin/superuser
-            if request and request.user.role not in ['ADMIN', 'SUPERUSER']:
-                raise serializers.ValidationError("Only admins can change user roles")
-            instance.role = role
+        if password:
+            # Validate password before updating
+            try:
+                PasswordValidator.validate_password(password)
+            except serializers.ValidationError as e:
+                raise serializers.ValidationError({'password': str(e)})
+
+            # Set new password
+            instance.set_password(password)
 
         # Update other fields
         instance.email = validated_data.get('email', instance.email)
-        instance.first_name = validated_data.get('first_name', instance.first_name)
-        instance.last_name = validated_data.get('last_name', instance.last_name)
         instance.phone_number = validated_data.get('phone_number', instance.phone_number)
-
-        # Password update
-        password = validated_data.get('password')
-        if password:
-            instance.set_password(password)
 
         instance.save()
         return instance
@@ -145,37 +170,63 @@ class UserManagementSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'date_joined', 'last_login']
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """
-    Custom JWT Token Serializer with flexible login
-    """
+    # Remove the default username and password fields
     login_input = serializers.CharField(required=True)
+    password = serializers.CharField(required=True, write_only=True)
+
+    def __init__(self, *args, **kwargs):
+        # Override the default fields to remove username and password
+        super().__init__(*args, **kwargs)
+        self.fields.pop('username', None)
+        self.fields.pop('password', None)
 
     def validate(self, attrs):
-        login_input = attrs.get('login_input')
-        password = attrs.get('password')
+        # Manually add login_input and password to attrs
+        login_input = self.initial_data.get('login_input')
+        password = self.initial_data.get('password')
 
         if not login_input or not password:
-            raise serializers.ValidationError("Must include 'login_input' and 'password'")
+            raise serializers.ValidationError({
+                "error": "Both login_input and password are required"
+            })
 
-        # Try authentication with username
-        user = authenticate(username=login_input, password=password)
+        # Try to authenticate with username or email
+        user = None
+        try:
+            # First, try authenticating with username
+            user = authenticate(username=login_input, password=password)
 
-        # If authentication fails, try with email
+            # If username auth fails, try with email
+            if not user:
+                try:
+                    user_obj = User.objects.get(email=login_input)
+                    user = authenticate(username=user_obj.username, password=password)
+                except User.DoesNotExist:
+                    user = None
+        except Exception as e:
+            raise serializers.ValidationError({
+                "error": "Authentication failed"
+            })
+
         if not user:
-            try:
-                user_obj = User.objects.get(email=login_input)
-                user = authenticate(username=user_obj.username, password=password)
-            except User.DoesNotExist:
-                user = None
+            raise serializers.ValidationError({
+                "error": "Invalid credentials"
+            })
 
-        if not user:
-            raise serializers.ValidationError("Unable to log in with provided credentials")
+        # Manually set username and password for parent class
+        attrs['username'] = user.username
+        attrs['password'] = password
 
-        # Generate tokens using the authenticated user
-        refresh = self.get_token(user)
+        # Use the parent class method to generate tokens
+        refresh = super().get_token(user)
 
         return {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
-            'user': UserSerializer(user).data
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'role': user.role
+            }
         }

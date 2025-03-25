@@ -9,7 +9,6 @@ from rest_framework_simplejwt.views import (
 )
 from users.views import CustomTokenObtainPairView
 
-# Swagger Schema View
 schema_view = get_schema_view(
    openapi.Info(
       title="Dictionary API",
@@ -24,19 +23,15 @@ schema_view = get_schema_view(
 )
 
 urlpatterns = [
-    # Admin and other app routes
     path('admin/', admin.site.urls),
 
-    # User and Dictionary routes
     path('api/users/', include('users.urls')),
     path('api/dictionary/', include('dictionary.urls')),
 
-    # Token-related paths
     path('api/token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/token/blacklist/', TokenBlacklistView.as_view(), name='token_blacklist'),
 
-    # Swagger documentation paths
     path('swagger<format>/', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

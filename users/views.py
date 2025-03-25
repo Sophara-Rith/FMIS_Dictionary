@@ -1,11 +1,9 @@
 # users/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status, serializers
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from django.contrib.auth import authenticate
 from django.shortcuts import get_object_or_404
 from .models import User
 from .serializers import UserSerializer, LoginSerializer, CustomTokenObtainPairSerializer
@@ -80,7 +78,7 @@ class UserLoginView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class UserRegisterView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         operation_description="User Registration",
@@ -120,10 +118,23 @@ class UserRegisterView(APIView):
     )
 
     def post(self, request):
+        if request.user.role not in ['SUPERUSER', 'ADMIN']:
+            return Response({
+                'error': 'You don\'t have the permission to perform this action.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        requested_role = request.data.get('role', 'USER')
+
+        if request.user.role == 'ADMIN' and requested_role == 'SUPERUSER':
+            return Response({
+                'error': 'ADMIN cannot create SUPERUSER accounts'
+            }, status=status.HTTP_403_FORBIDDEN)
+
         serializer = UserSerializer(data=request.data)
+
         if serializer.is_valid():
             try:
-                user = serializer.save()
+                user = serializer.save(role=requested_role)
                 return Response({
                     'message': 'User registered successfully',
                     'user': UserSerializer(user).data
@@ -132,34 +143,34 @@ class UserRegisterView(APIView):
                 return Response({
                     'error': str(e)
                 }, status=status.HTTP_400_BAD_REQUEST)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class UserDropView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
 
     @swagger_auto_schema(
-        operation_description="Delete User Account",
+        operation_description="Delete User Account (Admin Only)",
         manual_parameters=[
-
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="User ID for deletion",
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                'username',
+                openapi.IN_QUERY,
+                description="Username for deletion",
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                'email',
+                openapi.IN_QUERY,
+                description="User email for deletion",
+                type=openapi.TYPE_STRING
+            )
         ],
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['id', 'username', 'email'],
-            properties={
-                'id': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="user ID"
-                ),
-                'username': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="Username"
-                ),
-                'email': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="FMIS email address"
-                )
-            }
-        ),
         responses={
             200: openapi.Response(
                 description='User Deleted Successfully',
@@ -173,46 +184,19 @@ class UserDropView(APIView):
                         'deleted_user': openapi.Schema(
                             type=openapi.TYPE_OBJECT,
                             properties={
-                                'id': openapi.Schema(type=openapi.TYPE_INTEGER, description='Deleted user ID'),
-                                'username': openapi.Schema(type=openapi.TYPE_STRING, description='Deleted username'),
-                                'email': openapi.Schema(type=openapi.TYPE_STRING, description='Deleted user email')
+                                'id': openapi.Schema(
+                                    type=openapi.TYPE_INTEGER,
+                                    description='Deleted user ID'
+                                ),
+                                'username': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Deleted username'
+                                ),
+                                'email': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Deleted user email'
+                                )
                             }
-                        )
-                    }
-                )
-            ),
-            400: openapi.Response(
-                description='Bad Request - Missing Identification Parameter',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'error': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Error message'
-                        )
-                    }
-                )
-            ),
-            403: openapi.Response(
-                description='Forbidden - Unauthorized Deletion',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'error': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Authorization error message'
-                        )
-                    }
-                )
-            ),
-            404: openapi.Response(
-                description='Not Found - User Does Not Exist',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'error': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='User not found error message'
                         )
                     }
                 )
@@ -427,7 +411,7 @@ class UserListView(APIView):
     def get(self, request):
         # Support pagination and filtering
         page = int(request.query_params.get('page', 1))
-        per_page = int(request.query_params.get('per_page', 10))
+        per_page = int(request.query_params.get('per_page', 25))
         role = request.query_params.get('role')
         is_active = request.query_params.get('is_active')
 
@@ -494,6 +478,7 @@ class UserDetailView(APIView):
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_description="Obtain JWT Tokens",
@@ -517,13 +502,4 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         }
     )
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-
-        try:
-            serializer.is_valid(raise_exception=True)
-            return Response(serializer.validated_data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        return super().post(request, *args, **kwargs)

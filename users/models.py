@@ -10,7 +10,7 @@ def validate_fmis_email(value):
         raise ValidationError('Only FMIS email address is acceptant.')
 
 class UserManager(BaseUserManager):
-    def create_user(self, username, email, password=None, first_name=None, last_name=None, role='USER'):
+    def create_user(self, username, email, password=None, first_name=None, last_name=None, role='USER', phone_number=None):
         if not email:
             raise ValueError('Users must have an email address')
 
@@ -29,7 +29,8 @@ class UserManager(BaseUserManager):
             email=self.normalize_email(email),
             first_name=first_name,
             last_name=last_name,
-            role=role
+            role=role,
+            phone_number=phone_number
         )
         user.set_password(password)
         user.save(using=self._db)
