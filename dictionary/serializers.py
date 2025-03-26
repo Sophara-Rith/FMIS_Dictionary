@@ -1,64 +1,62 @@
 # dictionary/serializers.py
 from rest_framework import serializers
-from .models import Dictionary, WordType
+from .models import StagingDictionaryEntry, DictionaryEntry, WordType
 
-class DictionarySerializer(serializers.ModelSerializer):
-    word_type_en = serializers.SerializerMethodField()
-    word_type_kh = serializers.SerializerMethodField()
+class StagingDictionaryEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
-    updated_by = serializers.SerializerMethodField()
+    reviewed_by = serializers.SerializerMethodField()
 
     class Meta:
-        model = Dictionary
-        fields = [
-            'id',
-            'word_kh',
-            'word_en',
-            'definition_kh',
-            'definition_en',
-            'word_type_en',
-            'word_type_kh',
-            'word_type_en',
-            'word_type_kh',
-            'created_by',
-            'updated_by',
-            'created_at',
-            'updated_at'
-        ]
+        model = StagingDictionaryEntry
+        fields = '__all__'
         read_only_fields = [
-            'id',
             'created_at',
-            'updated_at'
+            'reviewed_at',
+            'review_status',
+            'created_by',
+            'reviewed_by'
         ]
 
-    def get_word_type_en_display(self, obj):
-        return obj.get_word_type_en_display()
-
-    def get_word_type_kh_display(self, obj):
-        return obj.get_word_type_kh_display()
-
-    def get_created_by_username(self, obj):
+    def get_created_by(self, obj):
+        # Return username instead of user ID
         return obj.created_by.username if obj.created_by else None
 
-    def get_updated_by_username(self, obj):
-        return obj.updated_by.username if obj.updated_by else None
+    def get_reviewed_by(self, obj):
+        # Return username instead of user ID
+        return obj.reviewed_by.username if obj.reviewed_by else None
 
-    def create(self, validated_data):
+    def validate(self, data):
+        # Validate word type consistency
+        en_type = data.get('word_en_type')
+        kh_type = data.get('word_kh_type')
 
-        en_type = validated_data.get('word_type_en')
-        kh_type = validated_data.get('word_type_kh')
-
+        # Create mapping between EN and KH word types
         type_map = dict(zip(
             [t[0] for t in WordType.WORD_TYPE_CHOICES_EN],
             [t[0] for t in WordType.WORD_TYPE_CHOICES_KH]
         ))
 
-        if type_map.get(en_type) != kh_type:
-            raise serializers.ValidationError("Word types must match between English and Khmer")
+        if en_type and kh_type and type_map.get(en_type) != kh_type:
+            raise serializers.ValidationError({
+                "word_type": "English and Khmer word types must match"
+            })
 
+        return data
+
+    def create(self, validated_data):
+        # Automatically set created_by to current user
         validated_data['created_by'] = self.context['request'].user
+        validated_data['review_status'] = 'PENDING'
         return super().create(validated_data)
 
-    def update(self, instance, validated_data):
-        validated_data['updated_by'] = self.context['request'].user
-        return super().update(instance, validated_data)
+class DictionaryEntrySerializer(serializers.ModelSerializer):
+    created_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DictionaryEntry
+        fields = '__all__'
+        read_only_fields = ['created_at', 'index', 'created_by']
+
+    def get_created_by(self, obj):
+        # Return username instead of user ID
+        return obj.created_by.username if obj.created_by else None

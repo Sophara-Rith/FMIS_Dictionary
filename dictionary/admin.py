@@ -1,3 +1,32 @@
+# dictionary/admin.py
 from django.contrib import admin
+from .models import StagingDictionaryEntry, DictionaryEntry
 
-# Register your models here.
+@admin.register(StagingDictionaryEntry)
+class StagingDictionaryEntryAdmin(admin.ModelAdmin):
+    list_display = [
+        'word_kh', 'word_en',
+        'word_kh_type', 'word_en_type',
+        'review_status',
+        'created_at', 'created_by'
+    ]
+    list_filter = [
+        'review_status',
+        'word_kh_type',
+        'word_en_type'
+    ]
+    search_fields = ['word_kh', 'word_en']
+
+@admin.register(DictionaryEntry)
+class DictionaryEntryAdmin(admin.ModelAdmin):
+    list_display = [
+        'word_kh', 'word_en',
+        'word_kh_type', 'word_en_type',
+        'index',
+        'created_at', 'created_by'
+    ]
+    list_filter = [
+        'word_kh_type',
+        'word_en_type'
+    ]
+    search_fields = ['word_kh', 'word_en']
