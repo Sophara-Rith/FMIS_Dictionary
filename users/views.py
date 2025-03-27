@@ -515,6 +515,7 @@ class MobileLoginView(APIView):
 
     @swagger_auto_schema(
         operation_description="Mobile App Static Login",
+        tags=['Mobile'],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=['login_input', 'password', 'device_id'],

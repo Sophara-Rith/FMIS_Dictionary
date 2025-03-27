@@ -99,7 +99,7 @@ class MobileDevice(models.Model):
         related_name='mobile_devices'
     )
     device_id = models.CharField(max_length=255, unique=True)
-    last_token = models.TextField(null=True, blank=True)  # Store last valid token
+    last_token = models.TextField(null=True, blank=True)
     token_created_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 

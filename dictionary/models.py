@@ -27,39 +27,46 @@ class WordType:
         ('ឧទានសព្ទ', 'Interjection')
     ]
 
-class StagingDictionaryEntry(models.Model):
+class StagingEntry(models.Model):
     REVIEW_STATUS_CHOICES = [
         ('PENDING', 'Pending Review'),
         ('APPROVED', 'Approved'),
         ('REJECTED', 'Rejected')
     ]
 
-    # Khmer Word Fields
+    LANGUAGE_CHOICES = [
+        ('KH-EN', 'Khmer to English'),
+        ('EN-KH', 'English to Khmer')
+    ]
+
+    # Word Fields
     word_kh = models.CharField(
         max_length=255,
         verbose_name='Khmer Word',
         validators=[MinLengthValidator(1, "Khmer word cannot be empty")]
     )
-    word_kh_type = models.CharField(
-        max_length=50,
-        choices=WordType.WORD_TYPE_CHOICES_KH,
-        verbose_name='Khmer Word Type'
-    )
-    word_kh_definition = models.TextField(
-        verbose_name='Khmer Word Definition',
-        validators=[MinLengthValidator(5, "Definition must be at least 5 characters")]
-    )
-
-    # English Word Fields
     word_en = models.CharField(
         max_length=255,
         verbose_name='English Word',
         validators=[MinLengthValidator(1, "English word cannot be empty")]
     )
+
+    # Type Fields
+    word_kh_type = models.CharField(
+        max_length=50,
+        choices=WordType.WORD_TYPE_CHOICES_KH,
+        verbose_name='Khmer Word Type'
+    )
     word_en_type = models.CharField(
         max_length=20,
         choices=WordType.WORD_TYPE_CHOICES_EN,
         verbose_name='English Word Type'
+    )
+
+    # Definition Fields
+    word_kh_definition = models.TextField(
+        verbose_name='Khmer Word Definition',
+        validators=[MinLengthValidator(5, "Definition must be at least 5 characters")]
     )
     word_en_definition = models.TextField(
         verbose_name='English Word Definition',
@@ -76,6 +83,11 @@ class StagingDictionaryEntry(models.Model):
     )
 
     # Review Fields
+    review_status = models.CharField(
+        max_length=20,
+        choices=REVIEW_STATUS_CHOICES,
+        default='PENDING'
+    )
     reviewed_at = models.DateTimeField(null=True, blank=True)
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -83,24 +95,6 @@ class StagingDictionaryEntry(models.Model):
         related_name='reviewed_staging_entries',
         null=True,
         blank=True
-    )
-    review_status = models.CharField(
-        max_length=20,
-        choices=REVIEW_STATUS_CHOICES,
-        default='PENDING'
-    )
-
-    # Metadata Fields
-    rejection_reason = models.TextField(
-        null=True,
-        blank=True,
-        verbose_name='Reason for Rejection'
-    )
-    source = models.CharField(
-        max_length=100,
-        null=True,
-        blank=True,
-        verbose_name='Source of Entry'
     )
 
     # Optional Additional Fields
@@ -134,22 +128,6 @@ class StagingDictionaryEntry(models.Model):
 
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"
-
-    def clean(self):
-        # Additional validation can be added here
-        from django.core.exceptions import ValidationError
-
-        # Ensure word types match
-        type_map = dict(zip(
-            [t[0] for t in WordType.WORD_TYPE_CHOICES_EN],
-            [t[0] for t in WordType.WORD_TYPE_CHOICES_KH]
-        ))
-
-        if self.word_en_type and self.word_kh_type:
-            if type_map.get(self.word_en_type) != self.word_kh_type:
-                raise ValidationError({
-                    'word_type': 'English and Khmer word types must match'
-                })
 
 class DictionaryEntry(models.Model):
     # Khmer Word Fields

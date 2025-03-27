@@ -1,9 +1,9 @@
 # dictionary/admin.py
 from django.contrib import admin
-from .models import StagingDictionaryEntry, DictionaryEntry
+from .models import StagingEntry, DictionaryEntry
 
-@admin.register(StagingDictionaryEntry)
-class StagingDictionaryEntryAdmin(admin.ModelAdmin):
+@admin.register(StagingEntry)
+class StagingEntryAdmin(admin.ModelAdmin):
     list_display = [
         'word_kh', 'word_en',
         'word_kh_type', 'word_en_type',

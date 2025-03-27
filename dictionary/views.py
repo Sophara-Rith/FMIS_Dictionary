@@ -1,51 +1,166 @@
 # dictionary/views.py
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.views import APIView
-from django.utils import timezone
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-import pandas as pd
-import io
+from .models import DictionaryEntry, StagingEntry, Bookmark, WordType
+from .serializers import (
+    DictionaryEntrySerializer,
+    BookmarkSerializer,
+    StagingEntrySerializer,
+    StagingEntryCreateSerializer
+)
 
-from .models import StagingDictionaryEntry, DictionaryEntry, Bookmark
-from .serializers import StagingDictionaryEntrySerializer, DictionaryEntrySerializer, BookmarkSerializer
-from users.custom_auth import DeviceJWTAuthentication
-from users.models import MobileDevice
-
-class StagingDictionaryEntryViewSet(viewsets.ModelViewSet):
-    queryset = StagingDictionaryEntry.objects.all()
-    serializer_class = StagingDictionaryEntrySerializer
+class DictionaryEntryListView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Create a new staging dictionary entry",
+        operation_description="List all approved dictionary entries",
+        manual_parameters=[
+            openapi.Parameter(
+                'language',
+                openapi.IN_QUERY,
+                description="Filter entries by language (KH-EN or EN-KH)",
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                'search',
+                openapi.IN_QUERY,
+                description="Search entries by word",
+                type=openapi.TYPE_STRING
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Successful retrieval of dictionary entries',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'word': openapi.Schema(type=openapi.TYPE_STRING),
+                            'definition': openapi.Schema(type=openapi.TYPE_STRING),
+                            'language': openapi.Schema(type=openapi.TYPE_STRING),
+                        }
+                    )
+                )
+            )
+        }
+    )
+    def get(self, request):
+        # Get query parameters
+        language = request.query_params.get('language')
+        search = request.query_params.get('search')
+
+        # Base queryset
+        entries = DictionaryEntry.objects.all()
+
+        # Apply filters
+        if language:
+            entries = entries.filter(language=language)
+
+        if search:
+            entries = entries.filter(word__icontains=search)
+
+        # Serialize and return
+        serializer = DictionaryEntrySerializer(entries, many=True)
+        return Response(serializer.data)
+
+class DictionaryEntryDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve a specific dictionary entry by ID",
+        responses={
+            200: openapi.Response(
+                description='Successful retrieval of dictionary entry',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'word': openapi.Schema(type=openapi.TYPE_STRING),
+                        'definition': openapi.Schema(type=openapi.TYPE_STRING),
+                        'language': openapi.Schema(type=openapi.TYPE_STRING),
+                        'examples': openapi.Schema(type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_STRING)),
+                    }
+                )
+            ),
+            404: 'Entry Not Found'
+        }
+    )
+    def get(self, request, pk):
+        try:
+            entry = DictionaryEntry.objects.get(pk=pk)
+            serializer = DictionaryEntrySerializer(entry)
+            return Response(serializer.data)
+        except DictionaryEntry.DoesNotExist:
+            return Response(
+                {'error': 'Dictionary entry not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+class StagingEntryListView(APIView):
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_description="List all staging entries pending approval",
+        responses={
+            200: openapi.Response(
+                description='Successful retrieval of staging entries',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'word': openapi.Schema(type=openapi.TYPE_STRING),
+                            'definition': openapi.Schema(type=openapi.TYPE_STRING),
+                            'submitted_by': openapi.Schema(type=openapi.TYPE_STRING),
+                            'created_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
+                        }
+                    )
+                )
+            )
+        }
+    )
+    def get(self, request):
+        entries = StagingEntry.objects.all()
+        serializer = StagingEntrySerializer(entries, many=True)
+        return Response(serializer.data)
+
+class StagingEntryCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Create a new staging entry for dictionary",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['word_kh', 'word_kh_type', 'word_kh_definition', 'word_en', 'word_en_type', 'word_en_definition'],
+            required=['word', 'definition', 'language'],
             properties={
-                'word_kh': openapi.Schema(type=openapi.TYPE_STRING, description='Khmer word'),
-                'word_kh_type': openapi.Schema(
+                'word': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description='Khmer word type',
-                    enum=['នាម', 'កិរិយាសព្ទ', 'គុណនាម', 'គុណកិរិយា', 'សព្វនាម', 'ធ្នាក់', 'ឈ្នាប់', 'ឧទានសព្ទ']
+                    description="The word to be added"
                 ),
-                'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING, description='Khmer word definition'),
-                'word_en': openapi.Schema(type=openapi.TYPE_STRING, description='English word'),
-                'word_en_type': openapi.Schema(
+                'definition': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description='English word type',
-                    enum=['NOUN', 'VERB', 'ADJECTIVE', 'ADVERB', 'PRONOUN', 'PREPOSITION', 'CONJUNCTION', 'INTERJECTION']
+                    description="Definition of the word"
                 ),
-                'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING, description='English word definition'),
-                'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING, description='Khmer word pronunciation'),
-                'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING, description='English word pronunciation'),
-                'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING, description='Example sentence in Khmer'),
-                'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING, description='Example sentence in English')
+                'language': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Language of the entry (KH-EN or EN-KH)",
+                    enum=['KH-EN', 'EN-KH']
+                ),
+                'examples': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_STRING),
+                    description="Example usages of the word"
+                )
             }
         ),
         responses={
@@ -55,215 +170,281 @@ class StagingDictionaryEntryViewSet(viewsets.ModelViewSet):
                     type=openapi.TYPE_OBJECT,
                     properties={
                         'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                        'review_status': openapi.Schema(type=openapi.TYPE_STRING),
-                        'created_by_username': openapi.Schema(type=openapi.TYPE_STRING)
+                        'word': openapi.Schema(type=openapi.TYPE_STRING),
+                        'definition': openapi.Schema(type=openapi.TYPE_STRING),
+                        'submitted_by': openapi.Schema(type=openapi.TYPE_STRING),
                     }
                 )
             ),
-            400: openapi.Response(
-                description='Validation error',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'error': openapi.Schema(type=openapi.TYPE_STRING)
-                    }
-                )
-            )
+            400: 'Validation Error'
         }
     )
-    def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
+    def post(self, request):
+        serializer = StagingEntryCreateSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                serializer.data,
+                status=status.HTTP_201_CREATED
+            )
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+class StagingEntryApproveView(APIView):
+    permission_classes = [IsAdminUser]
 
     @swagger_auto_schema(
-        operation_description="Approve a staging dictionary entry",
+        operation_description="Approve a staging entry and add to dictionary",
         responses={
-            201: openapi.Response(
-                description='Entry approved and added to dictionary',
+            200: openapi.Response(
+                description='Staging entry approved and added to dictionary',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
                         'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'entry_id': openapi.Schema(type=openapi.TYPE_INTEGER)
+                        'entry': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'word': openapi.Schema(type=openapi.TYPE_STRING),
+                                'definition': openapi.Schema(type=openapi.TYPE_STRING),
+                            }
+                        )
                     }
                 )
             ),
-            400: openapi.Response(
-                description='Approval error',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'error': openapi.Schema(type=openapi.TYPE_STRING)
-                    }
-                )
-            )
+            404: 'Staging Entry Not Found'
         }
     )
-    @action(detail=True, methods=['POST'], permission_classes=[IsAdminUser])
-    def approve(self, request, pk=None):
-        """
-        Approve a staging entry and move it to the main dictionary
-        """
-        staging_entry = self.get_object()
-
-        # Prevent re-approval
-        if staging_entry.review_status != 'PENDING':
-            return Response({
-                'error': 'Entry is not in pending status'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
+    def post(self, request, pk):
         try:
-            # Calculate next index
-            next_index = DictionaryEntry.objects.count() + 1
+            staging_entry = StagingEntry.objects.get(pk=pk)
 
-            # Create a new entry in the main dictionary
+            # Create dictionary entry
             dictionary_entry = DictionaryEntry.objects.create(
-                word_kh=staging_entry.word_kh,
-                word_kh_type=staging_entry.word_kh_type,
-                word_kh_definition=staging_entry.word_kh_definition,
-                word_en=staging_entry.word_en,
-                word_en_type=staging_entry.word_en_type,
-                word_en_definition=staging_entry.word_en_definition,
-                index=next_index,
-                created_by=staging_entry.created_by,
-                pronunciation_kh=staging_entry.pronunciation_kh,
-                pronunciation_en=staging_entry.pronunciation_en,
-                example_sentence_kh=staging_entry.example_sentence_kh,
-                example_sentence_en=staging_entry.example_sentence_en
+                word=staging_entry.word,
+                definition=staging_entry.definition,
+                language=staging_entry.language,
+                examples=staging_entry.examples
             )
 
-            # Update staging entry status
-            staging_entry.review_status = 'APPROVED'
-            staging_entry.reviewed_by = request.user
-            staging_entry.reviewed_at = timezone.now()
-            staging_entry.save()
+            # Delete staging entry
+            staging_entry.delete()
 
             return Response({
                 'message': 'Entry approved and added to dictionary',
-                'entry_id': dictionary_entry.id,
-                'created_by': dictionary_entry.created_by.username,
-                'reviewed_by': request.user.username
-            }, status=status.HTTP_201_CREATED)
+                'entry': DictionaryEntrySerializer(dictionary_entry).data
+            }, status=status.HTTP_200_OK)
+        except StagingEntry.DoesNotExist:
+            return Response(
+                {'error': 'Staging entry not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        except Exception as e:
-            return Response({
-                'error': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+class StagingEntryRejectView(APIView):
+    permission_classes = [IsAdminUser]
 
     @swagger_auto_schema(
-        operation_description="Reject a staging dictionary entry",
+        operation_description="Reject a staging entry",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['rejection_reason'],
             properties={
-                'rejection_reason': openapi.Schema(
+                'reason': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description='Reason for rejecting the entry'
+                    description="Reason for rejection"
                 )
             }
         ),
         responses={
-            200: openapi.Response(
-                description='Entry rejected successfully',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'rejection_reason': openapi.Schema(type=openapi.TYPE_STRING)
-                    }
-                )
-            ),
-            400: openapi.Response(
-                description='Rejection error',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'error': openapi.Schema(type=openapi.TYPE_STRING)
-                    }
-                )
-            )
+            200: 'Staging entry rejected successfully',
+            404: 'Staging Entry Not Found'
         }
     )
-    @action(detail=True, methods=['POST'], permission_classes=[IsAdminUser])
-    def reject(self, request, pk=None):
-        """
-        Reject a staging entry
-        """
-        staging_entry = self.get_object()
+    def post(self, request, pk):
+        try:
+            staging_entry = StagingEntry.objects.get(pk=pk)
 
-        # Prevent re-rejection
-        if staging_entry.review_status != 'PENDING':
+            # Optional: Log rejection reason
+            reason = request.data.get('reason', 'No reason provided')
+
+            # Delete staging entry
+            staging_entry.delete()
+
             return Response({
-                'error': 'Entry is not in pending status'
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'message': 'Entry rejected and deleted',
+                'reason': reason
+            }, status=status.HTTP_200_OK)
+        except StagingEntry.DoesNotExist:
+            return Response(
+                {'error': 'Staging entry not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        # Get rejection reason from request
-        rejection_reason = request.data.get('rejection_reason', 'No reason provided')
-
-        # Update staging entry status
-        staging_entry.review_status = 'REJECTED'
-        staging_entry.reviewed_by = request.user
-        staging_entry.reviewed_at = timezone.now()
-        staging_entry.rejection_reason = rejection_reason
-        staging_entry.save()
-
-        return Response({
-            'message': 'Entry rejected',
-            'rejection_reason': rejection_reason
-        })
-
-class DictionaryEntryViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = DictionaryEntry.objects.all()
-    serializer_class = DictionaryEntrySerializer
+class StagingEntryDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="List dictionary entries with optional filtering",
-        manual_parameters=[
-            openapi.Parameter(
-                'word_kh',
-                openapi.IN_QUERY,
-                description="Filter by Khmer word",
-                type=openapi.TYPE_STRING
-            ),
-            openapi.Parameter(
-                'word_en',
-                openapi.IN_QUERY,
-                description="Filter by English word",
-                type=openapi.TYPE_STRING
-            )
-        ],
+        operation_description="Retrieve details of a specific staging entry",
         responses={
             200: openapi.Response(
-                description='List of dictionary entries',
+                description='Successful retrieval of staging entry details',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'count': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'next': openapi.Schema(type=openapi.TYPE_STRING),
-                        'previous': openapi.Schema(type=openapi.TYPE_STRING),
-                        'results': openapi.Schema(
-                            type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(
-                                type=openapi.TYPE_OBJECT,
-                                properties={
-                                    'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                    'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                    'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                    'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                    'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                    'index': openapi.Schema(type=openapi.TYPE_INTEGER)
-                                }
-                            )
-                        )
+                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                        'review_status': openapi.Schema(type=openapi.TYPE_STRING),
+                        'created_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
+                        'created_by': openapi.Schema(type=openapi.TYPE_STRING)
                     }
                 )
-            )
+            ),
+            404: 'Staging Entry Not Found'
         }
     )
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+    def get(self, request, pk):
+        try:
+            staging_entry = StagingEntry.objects.get(pk=pk)
+
+            # Check if user is admin or the creator of the entry
+            if not (request.user.is_staff or
+                    staging_entry.created_by == request.user):
+                return Response(
+                    {'error': 'You are not authorized to view this entry'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            serializer = StagingEntrySerializer(staging_entry)
+            return Response(serializer.data)
+        except StagingEntry.DoesNotExist:
+            return Response(
+                {'error': 'Staging entry not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+class StagingEntryUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Update a staging entry",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_kh_type': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    enum=[choice[0] for choice in WordType.WORD_TYPE_CHOICES_KH]
+                ),
+                'word_en_type': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    enum=[choice[0] for choice in WordType.WORD_TYPE_CHOICES_EN]
+                ),
+                'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
+                'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
+            }
+        ),
+        responses={
+            200: 'Staging entry updated successfully',
+            400: 'Validation error',
+            403: 'Unauthorized',
+            404: 'Staging entry not found'
+        }
+    )
+    def put(self, request, pk):
+        try:
+            staging_entry = StagingEntry.objects.get(pk=pk)
+
+            # Only allow updates by the creator or admin
+            if not (request.user.is_staff or
+                    staging_entry.created_by == request.user):
+                return Response(
+                    {'error': 'You are not authorized to update this entry'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # Prevent updates to approved or rejected entries
+            if staging_entry.review_status != 'PENDING':
+                return Response(
+                    {'error': 'Cannot update non-pending entries'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            serializer = StagingEntryCreateSerializer(
+                staging_entry,
+                data=request.data,
+                partial=True,
+                context={'request': request}
+            )
+
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except StagingEntry.DoesNotExist:
+            return Response(
+                {'error': 'Staging entry not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+class StagingEntryDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Delete a staging entry",
+        responses={
+            204: 'Staging entry deleted successfully',
+            403: 'Unauthorized to delete',
+            404: 'Staging entry not found'
+        }
+    )
+    def delete(self, request, pk):
+        try:
+            staging_entry = StagingEntry.objects.get(pk=pk)
+
+            # Only allow deletion by the creator or admin
+            if not (request.user.is_staff or
+                    staging_entry.created_by == request.user):
+                return Response(
+                    {'error': 'You are not authorized to delete this entry'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # Prevent deletion of non-pending entries
+            if staging_entry.review_status != 'PENDING':
+                return Response(
+                    {'error': 'Cannot delete non-pending entries'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            staging_entry.delete()
+            return Response(
+                {'message': 'Staging entry deleted successfully'},
+                status=status.HTTP_204_NO_CONTENT
+            )
+        except StagingEntry.DoesNotExist:
+            return Response(
+                {'error': 'Staging entry not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 class BookmarkRateThrottle(UserRateThrottle):
     """
@@ -290,6 +471,7 @@ class BookmarkView(APIView):
 
     @swagger_auto_schema(
         operation_description="Add a bookmark for a word",
+        tags=['Mobile'],
         manual_parameters=[
             openapi.Parameter(
                 'X-Device-ID',
@@ -356,6 +538,7 @@ class BookmarkView(APIView):
         """
         Add a bookmark for a word
         """
+
         try:
             # Validate device ID
             device_id = self.validate_device_id(request)
@@ -399,6 +582,7 @@ class BookmarkView(APIView):
 
     @swagger_auto_schema(
         operation_description="Retrieve bookmarks for a device",
+        tags=['Mobile'],
         manual_parameters=[
             openapi.Parameter(
                 'X-Device-ID',
@@ -509,6 +693,7 @@ class BookmarkView(APIView):
 
     @swagger_auto_schema(
         operation_description="Remove a bookmark for a word",
+        tags=['Mobile'],
         manual_parameters=[
             openapi.Parameter(
                 'X-Device-ID',
