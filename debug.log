@@ -610,3 +610,5 @@ Traceback (most recent call last):
     )
 RuntimeError: You called this URL via POST, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining POST data. Change your form to point to 127.0.0.1:3050/api/token/blacklist/ (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
 "POST /api/token/blacklist HTTP/1.1" 500 81305
+Internal Server Error: /api/users/mobile/login/
+"POST /api/users/mobile/login/ HTTP/1.1" 500 53

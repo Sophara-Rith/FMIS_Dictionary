@@ -260,3 +260,26 @@ class DictionaryEntry(models.Model):
             self.index = (last_entry.index + 1) if last_entry else 1
 
         super().save(*args, **kwargs)
+
+class Bookmark(models.Model):
+    device_id = models.CharField(max_length=255)
+    word = models.ForeignKey(
+        'DictionaryEntry',
+        on_delete=models.CASCADE,
+        related_name='bookmarks'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_accessed = models.DateTimeField(null=True, blank=True)
+    access_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ('device_id', 'word')
+        indexes = [
+            models.Index(fields=['device_id', 'created_at']),
+            models.Index(fields=['last_accessed']),
+            models.Index(fields=['access_count'])
+        ]
+
+    def __str__(self):
+        return f"{self.device_id} - {self.word.word_kh}"
+

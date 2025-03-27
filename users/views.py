@@ -6,10 +6,9 @@ from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
-
 from dictionary_project import settings
 from .models import MobileDevice, User
-from .serializers import UserSerializer, LoginSerializer, CustomTokenObtainPairSerializer, MobileLoginSerializer
+from .serializers import UserSerializer, LoginSerializer, CustomTokenObtainPairSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 

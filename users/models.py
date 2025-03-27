@@ -1,9 +1,9 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
-from django.contrib.auth import get_user_model
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from django.conf import settings
 
 def validate_fmis_email(value):
     validate_email(value)
@@ -93,14 +93,33 @@ class User(AbstractBaseUser):
         return self.is_superuser
 
 class MobileDevice(models.Model):
-    user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name='mobile_devices')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='mobile_devices'
+    )
     device_id = models.CharField(max_length=255, unique=True)
-    last_login = models.DateTimeField(auto_now=True)
+    last_token = models.TextField(null=True, blank=True)  # Store last valid token
+    token_created_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    app_version = models.CharField(max_length=50, null=True, blank=True)
-    device_model = models.CharField(max_length=100, null=True, blank=True)
-    device_os = models.CharField(max_length=50, null=True, blank=True)
+
+    def update_token(self, token):
+        """
+        Update device's token information
+        """
+        self.last_token = token
+        self.token_created_at = timezone.now()
+        self.save()
+
+    def is_token_valid(self, token):
+        """
+        Check if the provided token matches the last token
+        """
+        return (
+            self.last_token == token and
+            self.is_active and
+            (timezone.now() - self.token_created_at).total_seconds() < 3600  # 1 hour validity
+        )
 
     def __str__(self):
         return f"{self.user.username} - {self.device_id}"

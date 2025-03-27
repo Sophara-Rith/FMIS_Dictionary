@@ -3,14 +3,19 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.views import APIView
 from django.utils import timezone
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 import pandas as pd
 import io
 
-from .models import StagingDictionaryEntry, DictionaryEntry
-from .serializers import StagingDictionaryEntrySerializer, DictionaryEntrySerializer
+from .models import StagingDictionaryEntry, DictionaryEntry, Bookmark
+from .serializers import StagingDictionaryEntrySerializer, DictionaryEntrySerializer, BookmarkSerializer
+from users.custom_auth import DeviceJWTAuthentication
+from users.models import MobileDevice
 
 class StagingDictionaryEntryViewSet(viewsets.ModelViewSet):
     queryset = StagingDictionaryEntry.objects.all()
@@ -259,3 +264,323 @@ class DictionaryEntryViewSet(viewsets.ReadOnlyModelViewSet):
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
+
+class BookmarkRateThrottle(UserRateThrottle):
+    """
+    Custom rate throttle to handle multiple device access
+    """
+    def get_cache_key(self, request, view):
+        # Use device ID instead of user ID for rate limiting
+        device_id = request.headers.get('X-Device-ID')
+        return f'throttle_device_{device_id}'
+
+class BookmarkView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [BookmarkRateThrottle]
+
+    def validate_device_id(self, request):
+        """
+        Validate device ID from request
+        """
+        device_id = request.headers.get('X-Device-ID')
+        if not device_id:
+            raise ValueError("Device ID is required in X-Device-ID header")
+        return device_id
+
+    @swagger_auto_schema(
+        operation_description="Add a bookmark for a word",
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                description="Unique Device Identifier",
+                type=openapi.TYPE_STRING,
+                required=True
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['word_id'],
+            properties={
+                'word_id': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description="ID of the dictionary entry to bookmark"
+                )
+            }
+        ),
+        responses={
+            201: openapi.Response(
+                description='Bookmark Added Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Success message'
+                        ),
+                        'bookmark': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'word_details': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'word_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
+                                    }
+                                ),
+                                'created_at': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    format=openapi.FORMAT_DATETIME
+                                )
+                            }
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Invalid Input',
+            401: 'Unauthorized - Invalid Authentication',
+            404: 'Not Found - Word Does Not Exist'
+        }
+    )
+    def post(self, request):
+        """
+        Add a bookmark for a word
+        """
+        try:
+            # Validate device ID
+            device_id = self.validate_device_id(request)
+
+            # Get word ID from request
+            word_id = request.data.get('word_id')
+            if not word_id:
+                return Response({
+                    'error': 'Word ID is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Find the word
+            try:
+                word = DictionaryEntry.objects.get(id=word_id)
+            except DictionaryEntry.DoesNotExist:
+                return Response({
+                    'error': 'Word not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Create or get bookmark
+            bookmark, created = Bookmark.objects.get_or_create(
+                device_id=device_id,
+                word=word
+            )
+
+            # Serialize and return word details
+            serializer = BookmarkSerializer(bookmark)
+            return Response({
+                'message': 'Bookmark added successfully' if created else 'Bookmark already exists',
+                'bookmark': serializer.data
+            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+        except ValueError as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'error': 'An unexpected error occurred'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @swagger_auto_schema(
+        operation_description="Retrieve bookmarks for a device",
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                description="Unique Device Identifier",
+                type=openapi.TYPE_STRING,
+                required=True
+            ),
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number for pagination",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of items per page",
+                type=openapi.TYPE_INTEGER,
+                default=10
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Successfully Retrieved Bookmarks',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'bookmarks': openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(
+                                type=openapi.TYPE_OBJECT,
+                                properties={
+                                    'word_details': openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'word_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
+                                        }
+                                    ),
+                                    'created_at': openapi.Schema(
+                                        type=openapi.TYPE_STRING,
+                                        format=openapi.FORMAT_DATETIME
+                                    )
+                                }
+                            )
+                        ),
+                        'total_bookmarks': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
+                    }
+                )
+            ),
+            400: 'Bad Request - Invalid Input',
+            401: 'Unauthorized - Invalid Authentication'
+        }
+    )
+    def get(self, request):
+        """
+        Retrieve bookmarks for a device
+        """
+        try:
+            # Validate device ID
+            device_id = self.validate_device_id(request)
+
+            # Get bookmarks
+            bookmarks = Bookmark.objects.filter(device_id=device_id)
+
+            # Paginate
+            page = int(request.query_params.get('page', 1))
+            per_page = int(request.query_params.get('per_page', 10))
+
+            start = (page - 1) * per_page
+            end = start + per_page
+
+            paginated_bookmarks = bookmarks[start:end]
+
+            # Serialize bookmarks
+            serializer = BookmarkSerializer(paginated_bookmarks, many=True)
+
+            return Response({
+                'bookmarks': serializer.data,
+                'total_bookmarks': bookmarks.count(),
+                'page': page,
+                'per_page': per_page,
+                'total_pages': (bookmarks.count() + per_page - 1) // per_page
+            })
+
+        except ValueError as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'error': 'An unexpected error occurred'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @swagger_auto_schema(
+        operation_description="Remove a bookmark for a word",
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                description="Unique Device Identifier",
+                type=openapi.TYPE_STRING,
+                required=True
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['word_id'],
+            properties={
+                'word_id': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description="ID of the dictionary entry to remove from bookmarks"
+                )
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description='Bookmark Removed Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Success message'
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Invalid Input',
+            401: 'Unauthorized - Invalid Authentication',
+            404: 'Not Found - Bookmark Does Not Exist'
+        }
+    )
+    def delete(self, request):
+        """
+        Remove a bookmark
+        """
+        try:
+            # Validate device ID
+            device_id = self.validate_device_id(request)
+
+            # Get word ID to remove
+            word_id = request.data.get('word_id')
+            if not word_id:
+                return Response({
+                    'error': 'Word ID is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Find and delete bookmark
+            try:
+                bookmark = Bookmark.objects.get(
+                    device_id=device_id,
+                    word_id=word_id
+                )
+                bookmark.delete()
+                return Response({
+                    'message': 'Bookmark removed successfully'
+                }, status=status.HTTP_200_OK)
+            except Bookmark.DoesNotExist:
+                return Response({
+                    'error': 'Bookmark not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+        except ValueError as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'error': 'An unexpected error occurred'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

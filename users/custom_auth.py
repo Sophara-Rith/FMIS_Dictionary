@@ -1,8 +1,11 @@
 # users/custom_auth.py
 from django.utils import timezone
-from rest_framework.authentication import TokenAuthentication
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.authentication import TokenAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.conf import settings
+from .models import MobileDevice
 
 class ExpiringTokenAuthentication(TokenAuthentication):
     def authenticate_credentials(self, key):
@@ -30,3 +33,36 @@ class ExpiringTokenAuthentication(TokenAuthentication):
         token.save()
 
         return (token.user, token)
+
+class DeviceJWTAuthentication(JWTAuthentication):
+    def authenticate(self, request):
+        # Get Authorization header
+        header = get_authorization_header(request)
+
+        # Get Device ID from header
+        device_id = request.headers.get('X-Device-ID')
+
+        if not device_id:
+            return None
+
+        try:
+            # Standard JWT authentication
+            validated_token = self.get_validated_token(header)
+
+            # Additional device validation
+            try:
+                # Check if device exists and is active
+                mobile_device = MobileDevice.objects.get(
+                    device_id=device_id,
+                    is_active=True
+                )
+            except MobileDevice.DoesNotExist:
+                raise InvalidToken("Invalid or inactive device")
+
+            # Get user from token
+            user = self.get_user(validated_token)
+
+            return (user, validated_token)
+
+        except (InvalidToken, TokenError):
+            return None
