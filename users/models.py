@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
+from django.contrib.auth import get_user_model
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -90,3 +91,16 @@ class User(AbstractBaseUser):
 
     def has_module_perms(self, app_label):
         return self.is_superuser
+
+class MobileDevice(models.Model):
+    user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name='mobile_devices')
+    device_id = models.CharField(max_length=255, unique=True)
+    last_login = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    app_version = models.CharField(max_length=50, null=True, blank=True)
+    device_model = models.CharField(max_length=100, null=True, blank=True)
+    device_os = models.CharField(max_length=50, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.device_id}"

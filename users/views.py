@@ -4,9 +4,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
-from .models import User
-from .serializers import UserSerializer, LoginSerializer, CustomTokenObtainPairSerializer
+
+from dictionary_project import settings
+from .models import MobileDevice, User
+from .serializers import UserSerializer, LoginSerializer, CustomTokenObtainPairSerializer, MobileLoginSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
@@ -301,6 +304,10 @@ class UserUpdateView(APIView):
             403: 'Unauthorized'
         }
     )
+
+    def patch(self, request):
+        return self._update_user(request, partial=True)
+
     def put(self, request):
         # User identification logic
         user_id = request.query_params.get('id')
@@ -503,3 +510,93 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
+
+class MobileLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_description="Mobile App Static Login",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['login_input', 'password', 'device_id'],
+            properties={
+                'login_input': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Static Mobile Username"
+                ),
+                'password': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Static Mobile Password"
+                ),
+                'device_id': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Unique Device Identifier"
+                )
+            }
+        ),
+        responses={
+            200: 'Successful Login',
+            400: 'Invalid Credentials'
+        }
+    )
+    def post(self, request):
+        # Extract data from request
+        login_input = request.data.get('login_input')
+        password = request.data.get('password')
+        device_id = request.data.get('device_id')
+
+        # Validate static credentials
+        if (login_input != settings.MOBILE_DEFAULT_USERNAME or
+            password != settings.MOBILE_DEFAULT_PASSWORD):
+            return Response({
+                'error': 'Invalid mobile credentials'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Authenticate the default mobile user
+        try:
+            user = User.objects.get(username=settings.MOBILE_DEFAULT_USERNAME)
+        except User.DoesNotExist:
+            # Create the default mobile user if not exists
+            user = self.create_default_mobile_user()
+
+        # Store or update device information
+        mobile_device, created = MobileDevice.objects.get_or_create(
+            device_id=device_id,
+            defaults={
+                'user': user,
+                'is_active': True
+            }
+        )
+
+        # Update last login if device exists
+        if not created:
+            mobile_device.user = user
+            mobile_device.save()
+
+        # Generate tokens
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            # 'device_id': device_id
+        }, status=status.HTTP_200_OK)
+
+    def create_default_mobile_user(self):
+        """
+        Create or retrieve the default mobile sync user
+        """
+        user, created = User.objects.get_or_create(
+            username=settings.MOBILE_DEFAULT_USERNAME,
+            defaults={
+                'email': 'mobile_sync@fmis.gov.kh',
+                'role': 'USER',
+                'is_active': True
+            }
+        )
+
+        if created or not user.check_password(settings.MOBILE_DEFAULT_PASSWORD):
+            user.set_password(settings.MOBILE_DEFAULT_PASSWORD)
+            user.save()
+
+        return user

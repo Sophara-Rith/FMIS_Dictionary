@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Mobile Sync Credentials
+MOBILE_DEFAULT_USERNAME = os.getenv('MOBILE_DEFAULT_USERNAME', 'default_mobile')
+MOBILE_DEFAULT_PASSWORD = os.getenv('MOBILE_DEFAULT_PASSWORD', 'Fmi$2025')
+
 HOST = os.environ.get('HOST', '0.0.0.0')
 PORT = os.environ.get('PORT', '3030')
 

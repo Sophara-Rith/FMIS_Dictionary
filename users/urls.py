@@ -5,7 +5,8 @@ from .views import (
     UserDropView,
     UserUpdateView,
     UserListView,
-    UserDetailView
+    UserDetailView,
+    MobileLoginView
 )
 
 urlpatterns = [
@@ -16,4 +17,6 @@ urlpatterns = [
     path('update/', UserUpdateView.as_view(), name='user-update'),
     path('list/', UserListView.as_view(), name='user-list'),
     path('detail/', UserDetailView.as_view(), name='user-detail'),
+
+    path('mobile/login/', MobileLoginView.as_view(), name='mobile_login'),
 ]
