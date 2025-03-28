@@ -27,7 +27,7 @@ class WordType:
         ('ឧទានសព្ទ', 'Interjection')
     ]
 
-class StagingEntry(models.Model):
+class Staging(models.Model):
     REVIEW_STATUS_CHOICES = [
         ('PENDING', 'Pending Review'),
         ('APPROVED', 'Approved'),
@@ -129,7 +129,7 @@ class StagingEntry(models.Model):
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"
 
-class DictionaryEntry(models.Model):
+class Dictionary(models.Model):
     # Khmer Word Fields
     word_kh = models.CharField(
         max_length=255,
@@ -227,6 +227,9 @@ class DictionaryEntry(models.Model):
         verbose_name_plural = 'Dictionary Entries'
         ordering = ['index']
         unique_together = [['word_kh', 'word_en']]
+        indexes = [
+            models.Index(fields=['created_at', 'index']),
+        ]
 
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"
@@ -234,7 +237,7 @@ class DictionaryEntry(models.Model):
     def save(self, *args, **kwargs):
         # Auto-generate index if not provided
         if not self.index:
-            last_entry = DictionaryEntry.objects.order_by('-index').first()
+            last_entry = Dictionary.objects.order_by('-index').first()
             self.index = (last_entry.index + 1) if last_entry else 1
 
         super().save(*args, **kwargs)
@@ -242,7 +245,7 @@ class DictionaryEntry(models.Model):
 class Bookmark(models.Model):
     device_id = models.CharField(max_length=255)
     word = models.ForeignKey(
-        'DictionaryEntry',
+        'Dictionary',
         on_delete=models.CASCADE,
         related_name='bookmarks'
     )

@@ -1,19 +1,27 @@
 # dictionary/views.py
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from .models import DictionaryEntry, StagingEntry, Bookmark, WordType
+from django.utils import timezone
+from django.core.cache import cache
+from django.conf import settings
+from .models import Dictionary, Staging, Bookmark, WordType
 from .serializers import (
     DictionaryEntrySerializer,
     BookmarkSerializer,
     StagingEntrySerializer,
-    StagingEntryCreateSerializer
+    StagingEntryCreateSerializer,
+    DictionaryEntrySyncSerializer
 )
+import logging
+import uuid
+
+logger = logging.getLogger(__name__)
 
 class DictionaryEntryListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -58,7 +66,7 @@ class DictionaryEntryListView(APIView):
         search = request.query_params.get('search')
 
         # Base queryset
-        entries = DictionaryEntry.objects.all()
+        entries = Dictionary.objects.all()
 
         # Apply filters
         if language:
@@ -96,10 +104,10 @@ class DictionaryEntryDetailView(APIView):
     )
     def get(self, request, pk):
         try:
-            entry = DictionaryEntry.objects.get(pk=pk)
+            entry = Dictionary.objects.get(pk=pk)
             serializer = DictionaryEntrySerializer(entry)
             return Response(serializer.data)
-        except DictionaryEntry.DoesNotExist:
+        except Dictionary.DoesNotExist:
             return Response(
                 {'error': 'Dictionary entry not found'},
                 status=status.HTTP_404_NOT_FOUND
@@ -130,7 +138,7 @@ class StagingEntryListView(APIView):
         }
     )
     def get(self, request):
-        entries = StagingEntry.objects.all()
+        entries = Staging.objects.all()
         serializer = StagingEntrySerializer(entries, many=True)
         return Response(serializer.data)
 
@@ -223,10 +231,10 @@ class StagingEntryApproveView(APIView):
     )
     def post(self, request, pk):
         try:
-            staging_entry = StagingEntry.objects.get(pk=pk)
+            staging_entry = Staging.objects.get(pk=pk)
 
             # Create dictionary entry
-            dictionary_entry = DictionaryEntry.objects.create(
+            dictionary_entry = Dictionary.objects.create(
                 word=staging_entry.word,
                 definition=staging_entry.definition,
                 language=staging_entry.language,
@@ -240,7 +248,7 @@ class StagingEntryApproveView(APIView):
                 'message': 'Entry approved and added to dictionary',
                 'entry': DictionaryEntrySerializer(dictionary_entry).data
             }, status=status.HTTP_200_OK)
-        except StagingEntry.DoesNotExist:
+        except Staging.DoesNotExist:
             return Response(
                 {'error': 'Staging entry not found'},
                 status=status.HTTP_404_NOT_FOUND
@@ -267,7 +275,7 @@ class StagingEntryRejectView(APIView):
     )
     def post(self, request, pk):
         try:
-            staging_entry = StagingEntry.objects.get(pk=pk)
+            staging_entry = Staging.objects.get(pk=pk)
 
             # Optional: Log rejection reason
             reason = request.data.get('reason', 'No reason provided')
@@ -279,7 +287,7 @@ class StagingEntryRejectView(APIView):
                 'message': 'Entry rejected and deleted',
                 'reason': reason
             }, status=status.HTTP_200_OK)
-        except StagingEntry.DoesNotExist:
+        except Staging.DoesNotExist:
             return Response(
                 {'error': 'Staging entry not found'},
                 status=status.HTTP_404_NOT_FOUND
@@ -314,7 +322,7 @@ class StagingEntryDetailView(APIView):
     )
     def get(self, request, pk):
         try:
-            staging_entry = StagingEntry.objects.get(pk=pk)
+            staging_entry = Staging.objects.get(pk=pk)
 
             # Check if user is admin or the creator of the entry
             if not (request.user.is_staff or
@@ -326,7 +334,7 @@ class StagingEntryDetailView(APIView):
 
             serializer = StagingEntrySerializer(staging_entry)
             return Response(serializer.data)
-        except StagingEntry.DoesNotExist:
+        except Staging.DoesNotExist:
             return Response(
                 {'error': 'Staging entry not found'},
                 status=status.HTTP_404_NOT_FOUND
@@ -367,7 +375,7 @@ class StagingEntryUpdateView(APIView):
     )
     def put(self, request, pk):
         try:
-            staging_entry = StagingEntry.objects.get(pk=pk)
+            staging_entry = Staging.objects.get(pk=pk)
 
             # Only allow updates by the creator or admin
             if not (request.user.is_staff or
@@ -399,7 +407,7 @@ class StagingEntryUpdateView(APIView):
                 serializer.errors,
                 status=status.HTTP_400_BAD_REQUEST
             )
-        except StagingEntry.DoesNotExist:
+        except Staging.DoesNotExist:
             return Response(
                 {'error': 'Staging entry not found'},
                 status=status.HTTP_404_NOT_FOUND
@@ -418,7 +426,7 @@ class StagingEntryDeleteView(APIView):
     )
     def delete(self, request, pk):
         try:
-            staging_entry = StagingEntry.objects.get(pk=pk)
+            staging_entry = Staging.objects.get(pk=pk)
 
             # Only allow deletion by the creator or admin
             if not (request.user.is_staff or
@@ -440,7 +448,7 @@ class StagingEntryDeleteView(APIView):
                 {'message': 'Staging entry deleted successfully'},
                 status=status.HTTP_204_NO_CONTENT
             )
-        except StagingEntry.DoesNotExist:
+        except Staging.DoesNotExist:
             return Response(
                 {'error': 'Staging entry not found'},
                 status=status.HTTP_404_NOT_FOUND
@@ -471,7 +479,7 @@ class BookmarkView(APIView):
 
     @swagger_auto_schema(
         operation_description="Add a bookmark for a word",
-        tags=['Mobile'],
+        tags=['mobile'],
         manual_parameters=[
             openapi.Parameter(
                 'X-Device-ID',
@@ -552,8 +560,8 @@ class BookmarkView(APIView):
 
             # Find the word
             try:
-                word = DictionaryEntry.objects.get(id=word_id)
-            except DictionaryEntry.DoesNotExist:
+                word = Dictionary.objects.get(id=word_id)
+            except Dictionary.DoesNotExist:
                 return Response({
                     'error': 'Word not found'
                 }, status=status.HTTP_404_NOT_FOUND)
@@ -582,7 +590,7 @@ class BookmarkView(APIView):
 
     @swagger_auto_schema(
         operation_description="Retrieve bookmarks for a device",
-        tags=['Mobile'],
+        tags=['mobile'],
         manual_parameters=[
             openapi.Parameter(
                 'X-Device-ID',
@@ -693,7 +701,7 @@ class BookmarkView(APIView):
 
     @swagger_auto_schema(
         operation_description="Remove a bookmark for a word",
-        tags=['Mobile'],
+        tags=['mobile'],
         manual_parameters=[
             openapi.Parameter(
                 'X-Device-ID',
@@ -769,3 +777,254 @@ class BookmarkView(APIView):
             return Response({
                 'error': 'An unexpected error occurred'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class DictionarySyncAllView(APIView):
+    """
+    Comprehensive Endpoint for Full Dictionary Synchronization
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id='dictionary_sync_all',
+        operation_description="""
+        Full Dictionary Synchronization Endpoint
+
+        ### Example Requests:
+        1. Default Sync:
+        ```
+        GET /dictionary/sync_all/
+        ```
+
+        2. Custom Pagination:
+        ```
+        GET /dictionary/sync_all/?page=2&per_page=500
+        ```
+        """,
+        manual_parameters=[
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number for pagination (default: 1)",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of entries per page (default: 1000, max: 2000)",
+                type=openapi.TYPE_INTEGER,
+                default=1000
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Successful Dictionary Synchronization',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'entries': openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(
+                                type=openapi.TYPE_OBJECT,
+                                properties={
+                                    'index': openapi.Schema(type=openapi.TYPE_INTEGER, description='Unique entry index'),
+                                    'word_kh': openapi.Schema(type=openapi.TYPE_STRING, description='Khmer word'),
+                                    'word_en': openapi.Schema(type=openapi.TYPE_STRING, description='English word'),
+                                }
+                            )
+                        ),
+                        'sync_metadata': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'sync_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                'sync_timestamp': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Invalid Parameters',
+            429: 'Too Many Requests'
+        }
+    )
+    def get(self, request):
+        # Generate unique sync request ID for tracking
+        sync_id = str(uuid.uuid4())
+        sync_timestamp = timezone.now().isoformat()
+
+        try:
+            # Validate and sanitize input parameters
+            page = max(1, int(request.query_params.get('page', 1)))
+            per_page = min(max(1, int(request.query_params.get('per_page', 1000))), 2000)
+
+            # Create cache key for this specific sync request
+            cache_key = f"sync_all_page_{page}_per_page_{per_page}"
+
+            # Try to retrieve cached response
+            cached_response = cache.get(cache_key)
+            if cached_response and settings.DEBUG is False:
+                logger.info(f"Serving cached sync all response - Sync ID: {sync_id}")
+                return Response(cached_response)
+
+            # Calculate pagination
+            total_entries = Dictionary.objects.count()
+            total_pages = (total_entries + per_page - 1) // per_page
+
+            # Validate page number
+            if page > total_pages:
+                return Response({
+                    'error': 'Page number exceeds total available pages',
+                    'total_pages': total_pages
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Calculate start and end indices
+            start = (page - 1) * per_page
+            end = start + per_page
+
+            # Fetch entries with optimized queryset
+            entries = Dictionary.objects.order_by('index')[start:end]
+
+            # Serialize entries
+            serializer = DictionaryEntrySyncSerializer(entries, many=True)
+
+            # Prepare response
+            response_data = {
+                'entries': serializer.data,
+                'sync_metadata': {
+                    'total_entries': total_entries,
+                    'page': page,
+                    'per_page': per_page,
+                    'total_pages': total_pages,
+                    'sync_id': sync_id,
+                    'sync_timestamp': sync_timestamp
+                }
+            }
+
+            # Cache response (if not in debug mode)
+            if settings.DEBUG is False:
+                cache.set(
+                    cache_key,
+                    response_data,
+                    timeout=3600  # Cache for 1 hour
+                )
+
+            # Log successful sync
+            logger.info(f"Sync All Successful - Sync ID: {sync_id}, Page: {page}, Entries: {len(entries)}")
+
+            return Response(response_data)
+
+        except ValueError as ve:
+            # Handle invalid parameter types
+            logger.error(f"Sync All Error - Invalid Parameters: {str(ve)}")
+            return Response({
+                'error': 'Invalid parameters',
+                'details': str(ve)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            # Catch-all for unexpected errors
+            logger.error(f"Sync All Critical Error - Sync ID: {sync_id}, Error: {str(e)}")
+            return Response({
+                'error': 'Internal server error',
+                'sync_id': sync_id
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class DictionarySyncView(APIView):
+    """
+    Endpoint for incremental dictionary data synchronization
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_description="""
+        Incremental Dictionary Sync for Mobile App
+
+        ### Requirements:
+        - Must provide the last synchronization timestamp
+
+        ### Example Scenarios:
+        1. Basic Sync:
+        ```
+        GET /dictionary/sync/?last_sync_timestamp=2024-03-22T10:30:45.123456Z
+        ```
+
+        2. Paginated Sync:
+        ```
+        GET /dictionary/sync/?last_sync_timestamp=2024-03-22T10:30:45.123456Z&page=2&per_page=500
+        ```
+        """,
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'last_sync_timestamp',
+                openapi.IN_QUERY,
+                description="Last Synchronization Timestamp",
+                type=openapi.TYPE_STRING,
+                required=True
+            ),
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number for pagination",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of entries per page",
+                type=openapi.TYPE_INTEGER,
+                default=500
+            )
+        ],
+        responses={
+            200: 'Successful Sync',
+            400: 'Invalid Request'
+        }
+    )
+    def get(self, request):
+        # Extract parameters
+        last_sync_timestamp = request.query_params.get('last_sync_timestamp')
+        page = int(request.query_params.get('page', 1))
+        per_page = int(request.query_params.get('per_page', 500))
+
+        # Validate parameters
+        if not last_sync_timestamp:
+            return Response({
+                'error': 'Last Sync Timestamp is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Parse last sync timestamp
+            last_sync = timezone.datetime.fromisoformat(last_sync_timestamp)
+        except ValueError:
+            return Response({
+                'error': 'Invalid timestamp format'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch new entries created after last sync
+        new_entries = Dictionary.objects.filter(
+            created_at__gt=last_sync
+        ).order_by('index')
+
+        # Calculate pagination
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_entries = new_entries[start:end]
+
+        # Serialize entries
+        serializer = DictionaryEntrySyncSerializer(paginated_entries, many=True)
+
+        # Prepare response
+        return Response({
+            'entries': serializer.data,
+            'total_new_entries': new_entries.count(),
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (new_entries.count() + per_page - 1) // per_page,
+            'last_sync_timestamp': timezone.now().isoformat()
+        })

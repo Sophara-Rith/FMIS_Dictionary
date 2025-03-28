@@ -4,7 +4,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 import re
-from .models import User, MobileDevice
+from .models import User
 
 class LoginSerializer(serializers.Serializer):
     """

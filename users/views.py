@@ -1,4 +1,5 @@
 # users/views.py
+from venv import logger
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -16,28 +17,14 @@ class UserLoginView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_description="User Login",
-        manual_parameters=[
-            # openapi.Parameter(
-            #     'username',
-            #     openapi.IN_QUERY,
-            #     description="Username for login (optional)",
-            #     type=openapi.TYPE_STRING
-            # ),
-            # openapi.Parameter(
-            #     'email',
-            #     openapi.IN_QUERY,
-            #     description="Email for login (optional)",
-            #     type=openapi.TYPE_STRING
-            # )
-        ],
+        operation_description="User Login Endpoint",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['login_input','password'],
+            required=['login_input', 'password'],
             properties={
                 'login_input': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="Username or FMIS email address"
+                    description="Username or Email"
                 ),
                 'password': openapi.Schema(
                     type=openapi.TYPE_STRING,
@@ -47,37 +34,64 @@ class UserLoginView(APIView):
         ),
         responses={
             200: 'Successful Login',
-            400: 'Invalid Credentials'
+            400: 'Invalid Credentials',
+            401: 'Authentication Failed'
         }
     )
-
     def post(self, request):
-        # Support multiple login parameters
-        username = request.query_params.get('username')
-        email = request.query_params.get('email')
-        password = request.data.get('password')
+        # Extract login credentials
+        login_input = request.data.get('login_input', '').strip()
+        password = request.data.get('password', '').strip()
 
-        # Validate login parameters
-        if not (username or email) or not password:
+        # Validate input fields
+        if not login_input or not password:
             return Response({
-                'error': 'Username/Email and password are required'
+                'error': 'Username/Email and password are required',
+                'details': {
+                    'login_input': 'Login input cannot be empty',
+                    'password': 'Password cannot be empty'
+                }
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Prepare login data
-        login_data = {
-            'login_input': username or email,
-            'password': password
-        }
+        try:
+            # Attempt to authenticate user
+            # Check if login_input is email or username
+            user = None
+            if '@' in login_input:
+                # Login with email
+                user = User.objects.filter(email=login_input).first()
+            else:
+                # Login with username
+                user = User.objects.filter(username=login_input).first()
 
-        serializer = LoginSerializer(data=login_data)
-        if serializer.is_valid():
-            user = serializer.validated_data['user']
+            # Validate user and password
+            if user and user.check_password(password):
+                # Generate tokens
+                refresh = RefreshToken.for_user(user)
+                return Response({
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                    'user': {
+                        'id': user.id,
+                        'username': user.username,
+                        'email': user.email,
+                        'role': user.role
+                    }
+                }, status=status.HTTP_200_OK)
+            else:
+                # Invalid credentials
+                return Response({
+                    'error': 'Invalid login credentials',
+                    'details': 'Username/Email or password is incorrect'
+                }, status=status.HTTP_401_UNAUTHORIZED)
+
+        except Exception as e:
+            # Log the error for debugging
+            logger.error(f"Login Error: {str(e)}")
             return Response({
-                'message': 'Login successful',
-                'user': UserSerializer(user).data,
-                'login_method': 'username' if username else 'email'
-            }, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                'error': 'An unexpected error occurred during login',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserRegisterView(APIView):
     permission_classes = [IsAuthenticated]
@@ -515,7 +529,7 @@ class MobileLoginView(APIView):
 
     @swagger_auto_schema(
         operation_description="Mobile App Static Login",
-        tags=['Mobile'],
+        tags=['mobile'],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=['login_input', 'password', 'device_id'],

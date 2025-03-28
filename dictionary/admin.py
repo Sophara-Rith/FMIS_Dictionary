@@ -1,8 +1,8 @@
 # dictionary/admin.py
 from django.contrib import admin
-from .models import StagingEntry, DictionaryEntry
+from .models import Staging, Dictionary
 
-@admin.register(StagingEntry)
+@admin.register(Staging)
 class StagingEntryAdmin(admin.ModelAdmin):
     list_display = [
         'word_kh', 'word_en',
@@ -17,7 +17,7 @@ class StagingEntryAdmin(admin.ModelAdmin):
     ]
     search_fields = ['word_kh', 'word_en']
 
-@admin.register(DictionaryEntry)
+@admin.register(Dictionary)
 class DictionaryEntryAdmin(admin.ModelAdmin):
     list_display = [
         'word_kh', 'word_en',

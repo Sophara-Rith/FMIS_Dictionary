@@ -10,7 +10,9 @@ from .views import (
     StagingEntryDeleteView,
     StagingEntryApproveView,
     StagingEntryRejectView,
-    BookmarkView
+    BookmarkView,
+    DictionarySyncAllView,
+    DictionarySyncView
 )
 
 urlpatterns = [
@@ -29,4 +31,7 @@ urlpatterns = [
     path('staging/<int:pk>/reject/', StagingEntryRejectView.as_view(), name='staging-entry-reject'),
 
     path('bookmarks/', BookmarkView.as_view(), name='bookmarks'),
+
+    path('sync_all/', DictionarySyncAllView.as_view(), name='dictionary_sync_all'),
+    path('sync/', DictionarySyncView.as_view(), name='dictionary_sync'),
 ]

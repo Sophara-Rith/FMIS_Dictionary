@@ -119,8 +119,18 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': os.getenv('ANON_RATE', '5/minute'),
-        'user': os.getenv('USER_RATE', '10/minute'),
+        'anon': os.getenv('ANON_RATE', '100/day'),
+        'user': os.getenv('USER_RATE', '1000/day'),
+    }
+}
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
     }
 }
 

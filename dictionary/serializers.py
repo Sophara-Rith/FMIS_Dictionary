@@ -1,13 +1,13 @@
 # dictionary/serializers.py
 from rest_framework import serializers
-from .models import StagingEntry, DictionaryEntry, WordType, Bookmark
+from .models import Staging, Dictionary, WordType, Bookmark
 
 class StagingDictionaryEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
     reviewed_by = serializers.SerializerMethodField()
 
     class Meta:
-        model = StagingEntry
+        model = Staging
         fields = '__all__'
         read_only_fields = [
             'created_at',
@@ -53,7 +53,7 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
 
     class Meta:
-        model = DictionaryEntry
+        model = Dictionary
         fields = '__all__'
         read_only_fields = ['created_at', 'index', 'created_by']
 
@@ -66,7 +66,7 @@ class StagingEntrySerializer(serializers.ModelSerializer):
     reviewed_by = serializers.SerializerMethodField()
 
     class Meta:
-        model = StagingEntry
+        model = Staging
         fields = '__all__'
         read_only_fields = [
             'created_at',
@@ -83,7 +83,7 @@ class StagingEntrySerializer(serializers.ModelSerializer):
 
 class StagingEntryCreateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = StagingEntry
+        model = Staging
         fields = [
             'word_kh', 'word_en',
             'word_kh_type', 'word_en_type',
@@ -138,3 +138,24 @@ class BookmarkSerializer(serializers.ModelSerializer):
             "example_sentence_kh": word.example_sentence_kh,
             "example_sentence_en": word.example_sentence_en
         }
+
+class DictionaryEntrySyncSerializer(serializers.ModelSerializer):
+    """
+    Serializer for dictionary entries synchronization
+    """
+    class Meta:
+        model = Dictionary
+        fields = [
+            'index',
+            'word_kh',
+            'word_en',
+            'word_kh_type',
+            'word_en_type',
+            'word_kh_definition',
+            'word_en_definition',
+            'pronunciation_kh',
+            'pronunciation_en',
+            'example_sentence_kh',
+            'example_sentence_en',
+            'created_at'
+        ]
