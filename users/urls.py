@@ -6,7 +6,8 @@ from .views import (
     UserUpdateView,
     UserListView,
     UserDetailView,
-    MobileLoginView
+    MobileLoginView,
+    CustomTokenRefreshView
 )
 
 urlpatterns = [
@@ -19,4 +20,5 @@ urlpatterns = [
     path('detail/', UserDetailView.as_view(), name='user-detail'),
 
     path('mobile/login/', MobileLoginView.as_view(), name='mobile_login'),
+    path('mobile/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
 ]

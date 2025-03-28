@@ -107,6 +107,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        'users.custom_auth.DeviceSpecificJWTAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
@@ -122,6 +123,12 @@ REST_FRAMEWORK = {
         'anon': os.getenv('ANON_RATE', '100/day'),
         'user': os.getenv('USER_RATE', '1000/day'),
     }
+}
+
+DICTIONARY_SEARCH_CONFIG = {
+    'MAX_RESULTS': 100,
+    'DEFAULT_PAGE_SIZE': 10,
+    'CACHE_TIMEOUT': 3600,  # 1 hour
 }
 
 CACHES = {

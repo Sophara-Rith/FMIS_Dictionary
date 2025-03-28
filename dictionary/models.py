@@ -111,11 +111,13 @@ class Staging(models.Model):
         verbose_name='English Pronunciation'
     )
     example_sentence_kh = models.TextField(
+        max_length=255,
         null=True,
         blank=True,
         verbose_name='Example Sentence in Khmer'
     )
     example_sentence_en = models.TextField(
+        max_length=255,
         null=True,
         blank=True,
         verbose_name='Example Sentence in English'
@@ -134,113 +136,86 @@ class Dictionary(models.Model):
     word_kh = models.CharField(
         max_length=255,
         verbose_name='Khmer Word',
-        validators=[MinLengthValidator(1, "Khmer word cannot be empty")]
+        db_index=True
     )
     word_kh_type = models.CharField(
         max_length=50,
-        choices=WordType.WORD_TYPE_CHOICES_KH,
-        verbose_name='Khmer Word Type'
+        choices=[
+            ('noun', 'Noun'),
+            ('verb', 'Verb'),
+            ('adjective', 'Adjective'),
+            ('adverb', 'Adverb'),
+            ('pronoun', 'Pronoun'),
+            ('preposition', 'Preposition'),
+            ('conjunction', 'Conjunction'),
+            ('interjection', 'Interjection')
+        ]
     )
     word_kh_definition = models.TextField(
         verbose_name='Khmer Word Definition',
-        validators=[MinLengthValidator(5, "Definition must be at least 5 characters")]
+        db_index=True
     )
 
     # English Word Fields
     word_en = models.CharField(
         max_length=255,
         verbose_name='English Word',
-        validators=[MinLengthValidator(1, "English word cannot be empty")]
+        db_index=True
     )
     word_en_type = models.CharField(
-        max_length=20,
-        choices=WordType.WORD_TYPE_CHOICES_EN,
-        verbose_name='English Word Type'
+        max_length=50,
+        choices=[
+            ('noun', 'Noun'),
+            ('verb', 'Verb'),
+            ('adjective', 'Adjective'),
+            ('adverb', 'Adverb'),
+            ('pronoun', 'Pronoun'),
+            ('preposition', 'Preposition'),
+            ('conjunction', 'Conjunction'),
+            ('interjection', 'Interjection')
+        ]
     )
     word_en_definition = models.TextField(
         verbose_name='English Word Definition',
-        validators=[MinLengthValidator(5, "Definition must be at least 5 characters")]
+        db_index=True
     )
 
-    # Metadata Fields
-    index = models.IntegerField(
-        unique=True,
-        verbose_name='Dictionary Index'
-    )
-
-    # Tracking Fields
-    created_at = models.DateTimeField(default=timezone.now)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        related_name='created_entries',
-        null=True
-    )
-
-    # Optional Additional Fields
-    pronunciation_kh = models.CharField(
-        max_length=255,
-        null=True,
-        blank=True,
-        verbose_name='Khmer Pronunciation'
-    )
-    pronunciation_en = models.CharField(
-        max_length=255,
-        null=True,
-        blank=True,
-        verbose_name='English Pronunciation'
-    )
+    # Example Sentences
     example_sentence_kh = models.TextField(
         null=True,
         blank=True,
-        verbose_name='Example Sentence in Khmer'
+        verbose_name='Example Sentence in Khmer',
+        db_index=True
     )
     example_sentence_en = models.TextField(
         null=True,
         blank=True,
-        verbose_name='Example Sentence in English'
+        verbose_name='Example Sentence in English',
+        db_index=True
     )
 
-    # Additional Metadata
-    source = models.CharField(
-        max_length=100,
-        null=True,
-        blank=True,
-        verbose_name='Source of Entry'
-    )
-    is_verified = models.BooleanField(
-        default=False,
-        verbose_name='Verified Entry'
-    )
-    difficulty_level = models.CharField(
-        max_length=20,
-        choices=[
-            ('BEGINNER', 'Beginner'),
-            ('INTERMEDIATE', 'Intermediate'),
-            ('ADVANCED', 'Advanced')
-        ],
-        null=True,
-        blank=True
+    updated_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+
+    # Metadata
+    created_at = models.DateTimeField(default=timezone.now)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True
     )
 
     class Meta:
         verbose_name_plural = 'Dictionary Entries'
-        ordering = ['index']
-        unique_together = [['word_kh', 'word_en']]
         indexes = [
-            models.Index(fields=['created_at', 'index']),
+            # Multilingual full-text search optimization
+            models.Index(fields=['word_kh', 'word_en']),
+            models.Index(fields=['word_kh_definition', 'word_en_definition']),
+            models.Index(fields=['example_sentence_kh', 'example_sentence_en']),
         ]
 
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"
-
-    def save(self, *args, **kwargs):
-        # Auto-generate index if not provided
-        if not self.index:
-            last_entry = Dictionary.objects.order_by('-index').first()
-            self.index = (last_entry.index + 1) if last_entry else 1
-
-        super().save(*args, **kwargs)
 
 class Bookmark(models.Model):
     device_id = models.CharField(max_length=255)

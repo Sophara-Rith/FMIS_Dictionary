@@ -1,7 +1,6 @@
 # users/serializers.py
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 import re
 from .models import User
@@ -231,61 +230,3 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'role': user.role
             }
         }
-
-# class MobileLoginSerializer(serializers.Serializer):
-
-#     class Meta:
-#         model = MobileDevice
-#         fields = [
-#             'device_id',
-#             'last_login',
-#             'is_active',
-#             'created_at',
-#             'app_version',
-#             'device_model',
-#             'device_os'
-#         ]
-
-#     login_input = serializers.CharField()
-#     password = serializers.CharField(write_only=True)
-#     device_id = serializers.CharField(max_length=255)
-
-#     def validate(self, data):
-#         # Validate login credentials (similar to existing login logic)
-#         login_input = data.get('login_input')
-#         password = data.get('password')
-#         device_id = data.get('device_id')
-
-#         # Authenticate user
-#         user = authenticate(username=login_input, password=password)
-
-#         if not user:
-#             try:
-#                 # Try authentication with email
-#                 user_obj = User.objects.get(email=login_input)
-#                 user = authenticate(username=user_obj.username, password=password)
-#             except User.DoesNotExist:
-#                 user = None
-
-#         if not user:
-#             raise serializers.ValidationError("Invalid login credentials")
-
-#         # Store or update device information
-#         mobile_device, created = MobileDevice.objects.get_or_create(
-#             device_id=device_id,
-#             defaults={'user': user}
-#         )
-
-#         # Update last login if device exists
-#         if not created:
-#             mobile_device.user = user
-#             mobile_device.save()
-
-#         # Generate tokens
-#         refresh = RefreshToken.for_user(user)
-
-#         data['user'] = user
-#         data['refresh'] = str(refresh)
-#         data['access'] = str(refresh.access_token)
-
-#         return data

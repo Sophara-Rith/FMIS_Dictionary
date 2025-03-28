@@ -1,6 +1,7 @@
 # dictionary/serializers.py
 from rest_framework import serializers
 from .models import Staging, Dictionary, WordType, Bookmark
+from django.utils import timezone
 
 class StagingDictionaryEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
@@ -140,22 +141,63 @@ class BookmarkSerializer(serializers.ModelSerializer):
         }
 
 class DictionaryEntrySyncSerializer(serializers.ModelSerializer):
-    """
-    Serializer for dictionary entries synchronization
-    """
+    sync_status = serializers.SerializerMethodField()
+
     class Meta:
         model = Dictionary
         fields = [
-            'index',
+            'id',
             'word_kh',
             'word_en',
             'word_kh_type',
             'word_en_type',
             'word_kh_definition',
             'word_en_definition',
-            'pronunciation_kh',
-            'pronunciation_en',
             'example_sentence_kh',
             'example_sentence_en',
-            'created_at'
+            'created_at',
+            'updated_at',
+            'sync_status'
         ]
+
+    def get_sync_status(self, obj):
+        """
+        Determine sync status of the entry
+        """
+        request = self.context.get('request')
+        last_sync = request.query_params.get('last_sync_timestamp')
+
+        if last_sync:
+            last_sync_time = timezone.datetime.fromisoformat(last_sync)
+
+            if obj.created_at > last_sync_time:
+                return 'NEW'
+            elif obj.updated_at > last_sync_time:
+                return 'UPDATED'
+
+        return 'UNCHANGED'
+
+class DictionaryEntrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Dictionary
+        fields = [
+            'id',
+            'word_kh',
+            'word_en',
+            'word_kh_type',
+            'word_en_type',
+            'word_kh_definition',
+            'word_en_definition',
+            'example_sentence_kh',
+            'example_sentence_en'
+        ]
+
+class DictionarySearchSerializer(serializers.Serializer):
+    # Custom serializer for search results with additional metadata
+    results = DictionaryEntrySerializer(many=True)
+    total_results = serializers.IntegerField()
+    page = serializers.IntegerField()
+    total_pages = serializers.IntegerField()
+    search_query = serializers.CharField()
+    search_language = serializers.CharField()
+    search_fields = serializers.ListField(child=serializers.CharField())

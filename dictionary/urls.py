@@ -12,7 +12,8 @@ from .views import (
     StagingEntryRejectView,
     BookmarkView,
     DictionarySyncAllView,
-    DictionarySyncView
+    DictionarySyncView,
+    DictionarySearchView
 )
 
 urlpatterns = [
@@ -34,4 +35,6 @@ urlpatterns = [
 
     path('sync_all/', DictionarySyncAllView.as_view(), name='dictionary_sync_all'),
     path('sync/', DictionarySyncView.as_view(), name='dictionary_sync'),
+
+    path('search/', DictionarySearchView.as_view(), name='dictionary-search'),
 ]

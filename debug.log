@@ -655,3 +655,50 @@ Traceback (most recent call last):
     import redis
 ModuleNotFoundError: No module named 'redis'
 "GET /swagger/ HTTP/1.1" 500 132580
+Internal Server Error: /api/users/mobile/login/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\users\views.py", line 594, in post
+    user = User.objects.get(username='mobile_default_user')
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\db\models\query.py", line 649, in get
+    raise self.model.DoesNotExist(
+        "%s matching query does not exist." % self.model._meta.object_name
+    )
+users.models.User.DoesNotExist: User matching query does not exist.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\users\views.py", line 597, in post
+    user = User.objects.create_user(
+        username='mobile_default_user',
+        email='mobile_default@dictionary.app',
+        password='SecureDefaultMobilePassword123!'
+    )
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\users\models.py", line 21, in create_user
+    validate_fmis_email(email)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\users\models.py", line 13, in validate_fmis_email
+    raise ValidationError('Only FMIS email address is acceptant.')
+django.core.exceptions.ValidationError: ['Only FMIS email address is acceptant.']
+"POST /api/users/mobile/login/ HTTP/1.1" 500 126398

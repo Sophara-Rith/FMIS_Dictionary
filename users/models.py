@@ -1,3 +1,5 @@
+# users/models.py
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.core.validators import validate_email
@@ -99,27 +101,52 @@ class MobileDevice(models.Model):
         related_name='mobile_devices'
     )
     device_id = models.CharField(max_length=255, unique=True)
-    last_token = models.TextField(null=True, blank=True)
+
+    # Store individual tokens for each device
+    access_token = models.TextField(null=True, blank=True)
+    refresh_token = models.TextField(null=True, blank=True)
+
     token_created_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
-    def update_token(self, token):
+    def generate_device_tokens(self, user):
         """
-        Update device's token information
+        Generate and store unique tokens for this specific device
         """
-        self.last_token = token
+        # Create refresh token
+        refresh = RefreshToken.for_user(user)
+
+        # Add device-specific identifier to prevent conflicts
+        refresh['device_id'] = self.device_id
+
+        # Store both access and refresh tokens
+        self.access_token = str(refresh.access_token)
+        self.refresh_token = str(refresh)
         self.token_created_at = timezone.now()
         self.save()
 
-    def is_token_valid(self, token):
-        """
-        Check if the provided token matches the last token
-        """
-        return (
-            self.last_token == token and
-            self.is_active and
-            (timezone.now() - self.token_created_at).total_seconds() < 3600  # 1 hour validity
-        )
+        return {
+            'access_token': self.access_token,
+            'refresh_token': self.refresh_token
+        }
 
-    def __str__(self):
-        return f"{self.user.username} - {self.device_id}"
+    def refresh_device_tokens(self, user):
+        """
+        Refresh tokens for this specific device without invalidating other devices
+        """
+        # Create new refresh token
+        refresh = RefreshToken.for_user(user)
+
+        # Maintain device-specific identifier
+        refresh['device_id'] = self.device_id
+
+        # Update tokens
+        self.access_token = str(refresh.access_token)
+        self.refresh_token = str(refresh)
+        self.token_created_at = timezone.now()
+        self.save()
+
+        return {
+            'access_token': self.access_token,
+            'refresh_token': self.refresh_token
+        }

@@ -66,3 +66,32 @@ class DeviceJWTAuthentication(JWTAuthentication):
 
         except (InvalidToken, TokenError):
             return None
+
+class DeviceSpecificJWTAuthentication(JWTAuthentication):
+    def authenticate(self, request):
+        # Get Device ID from header
+        device_id = request.headers.get('X-Device-ID')
+
+        if not device_id:
+            return None
+
+        try:
+            # Validate token
+            validated_token = self.get_validated_token(
+                get_authorization_header(request)
+            )
+
+            # Check device-specific token
+            mobile_device = MobileDevice.objects.get(
+                device_id=device_id,
+                access_token=str(validated_token),
+                is_active=True
+            )
+
+            # Get user from token
+            user = self.get_user(validated_token)
+
+            return (user, validated_token)
+
+        except (MobileDevice.DoesNotExist, InvalidToken):
+            return None

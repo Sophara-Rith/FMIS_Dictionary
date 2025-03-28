@@ -22,7 +22,6 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
     list_display = [
         'word_kh', 'word_en',
         'word_kh_type', 'word_en_type',
-        'index',
         'created_at', 'created_by'
     ]
     list_filter = [

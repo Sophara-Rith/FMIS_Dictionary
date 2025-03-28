@@ -1,17 +1,20 @@
 # users/views.py
 from venv import logger
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
-from dictionary_project import settings
+from django.contrib.auth import get_user_model
 from .models import MobileDevice, User
-from .serializers import UserSerializer, LoginSerializer, CustomTokenObtainPairSerializer
+from .serializers import UserSerializer, CustomTokenObtainPairSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+
+User = get_user_model()
 
 class UserLoginView(APIView):
     permission_classes = [AllowAny]
@@ -528,52 +531,77 @@ class MobileLoginView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_description="Mobile App Static Login",
+        operation_description="Mobile Device Login",
         tags=['mobile'],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['login_input', 'password', 'device_id'],
+            required=['device_id'],
             properties={
-                'login_input': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="Static Mobile Username"
-                ),
-                'password': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="Static Mobile Password"
-                ),
                 'device_id': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="Unique Device Identifier"
+                    description='Unique identifier for the mobile device'
+                ),
+                'device_name': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Optional name of the device',
+                    nullable=True
+                ),
+                'device_type': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Optional type of device (iOS/Android)',
+                    nullable=True
+                ),
+                'app_version': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Optional app version',
+                    nullable=True
                 )
             }
         ),
         responses={
-            200: 'Successful Login',
-            400: 'Invalid Credentials'
+            200: openapi.Response(
+                description='Successful Login',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'access_token': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='JWT Access Token'
+                        ),
+                        'refresh_token': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='JWT Refresh Token'
+                        ),
+                        'device_id': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Device Identifier'
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Missing Device ID'
         }
     )
     def post(self, request):
-        # Extract data from request
-        login_input = request.data.get('login_input')
-        password = request.data.get('password')
         device_id = request.data.get('device_id')
 
-        # Validate static credentials
-        if (login_input != settings.MOBILE_DEFAULT_USERNAME or
-            password != settings.MOBILE_DEFAULT_PASSWORD):
+        if not device_id:
             return Response({
-                'error': 'Invalid mobile credentials'
-            }, status=status.HTTP_401_UNAUTHORIZED)
+                'error': 'Device ID is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Authenticate the default mobile user
+        # Use default mobile user (ensure this user exists)
         try:
-            user = User.objects.get(username=settings.MOBILE_DEFAULT_USERNAME)
+            user = User.objects.get(username='default_mobile')
         except User.DoesNotExist:
-            # Create the default mobile user if not exists
-            user = self.create_default_mobile_user()
+            # Create default mobile user if not exists
+            user = User.objects.create_user(
+                username=settings.MOBILE_DEFAULT_USERNAME,
+                email=f'{settings.MOBILE_DEFAULT_USERNAME}@fmis.gov.kh',
+                password=settings.MOBILE_DEFAULT_PASSWORD
+            )
 
-        # Store or update device information
+        # Find or create mobile device
         mobile_device, created = MobileDevice.objects.get_or_create(
             device_id=device_id,
             defaults={
@@ -582,35 +610,85 @@ class MobileLoginView(APIView):
             }
         )
 
-        # Update last login if device exists
-        if not created:
-            mobile_device.user = user
-            mobile_device.save()
-
-        # Generate tokens
-        refresh = RefreshToken.for_user(user)
+        # Generate device-specific tokens
+        tokens = mobile_device.generate_device_tokens(user)
 
         return Response({
-            'access': str(refresh.access_token),
-            'refresh': str(refresh),
-            # 'device_id': device_id
-        }, status=status.HTTP_200_OK)
+            'access_token': tokens['access_token'],
+            'refresh_token': tokens['refresh_token'],
+            'device_id': device_id
+        })
 
-    def create_default_mobile_user(self):
-        """
-        Create or retrieve the default mobile sync user
-        """
-        user, created = User.objects.get_or_create(
-            username=settings.MOBILE_DEFAULT_USERNAME,
-            defaults={
-                'email': 'mobile_sync@fmis.gov.kh',
-                'role': 'USER',
-                'is_active': True
+class CustomTokenRefreshView(TokenRefreshView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_description="Refresh Mobile Device Token",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                name='X-Device-ID',
+                in_=openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique identifier for the mobile device',
+                required=True
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['refresh'],
+            properties={
+                'refresh': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Current refresh token'
+                )
             }
-        )
+        ),
+        responses={
+            200: openapi.Response(
+                description='Token Refreshed Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'access': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='New JWT Access Token'
+                        ),
+                        'refresh': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='New JWT Refresh Token'
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Invalid Device or Token'
+        }
+    )
+    def post(self, request, *args, **kwargs):
+        # Get device ID from request
+        device_id = request.headers.get('X-Device-ID')
 
-        if created or not user.check_password(settings.MOBILE_DEFAULT_PASSWORD):
-            user.set_password(settings.MOBILE_DEFAULT_PASSWORD)
-            user.save()
+        if not device_id:
+            return Response({
+                'error': 'Device ID is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        return user
+        try:
+            # Find the specific device
+            mobile_device = MobileDevice.objects.get(
+                device_id=device_id,
+                refresh_token=request.data.get('refresh')
+            )
+
+            # Refresh tokens for this specific device
+            new_tokens = mobile_device.refresh_device_tokens(mobile_device.user)
+
+            return Response({
+                'access': new_tokens['access_token'],
+                'refresh': new_tokens['refresh_token']
+            })
+
+        except MobileDevice.DoesNotExist:
+            return Response({
+                'error': 'Invalid device or refresh token'
+            }, status=status.HTTP_400_BAD_REQUEST)

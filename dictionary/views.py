@@ -1,8 +1,14 @@
 # dictionary/views.py
+import time
+import logging
+from functools import wraps, reduce
+import operator
+import uuid
+import hashlib
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
-from rest_framework.throttling import UserRateThrottle
+from rest_framework.throttling import UserRateThrottle, AnonRateThrottle
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
@@ -10,6 +16,7 @@ from drf_yasg import openapi
 from django.utils import timezone
 from django.core.cache import cache
 from django.conf import settings
+from django.db.models import Q
 from .models import Dictionary, Staging, Bookmark, WordType
 from .serializers import (
     DictionaryEntrySerializer,
@@ -18,8 +25,6 @@ from .serializers import (
     StagingEntryCreateSerializer,
     DictionaryEntrySyncSerializer
 )
-import logging
-import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -786,6 +791,7 @@ class DictionarySyncAllView(APIView):
 
     @swagger_auto_schema(
         operation_id='dictionary_sync_all',
+        tags={'mobile'},
         operation_description="""
         Full Dictionary Synchronization Endpoint
 
@@ -934,35 +940,28 @@ class DictionarySyncAllView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class DictionarySyncView(APIView):
-    """
-    Endpoint for incremental dictionary data synchronization
-    """
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_description="""
-        Incremental Dictionary Sync for Mobile App
+        Incremental Dictionary Synchronization Endpoint
 
-        ### Requirements:
-        - Must provide the last synchronization timestamp
+        This endpoint allows mobile apps to:
+        - Fetch new entries
+        - Get updates to existing entries
+        - Synchronize dictionary content
 
-        ### Example Scenarios:
-        1. Basic Sync:
-        ```
-        GET /dictionary/sync/?last_sync_timestamp=2024-03-22T10:30:45.123456Z
-        ```
-
-        2. Paginated Sync:
-        ```
-        GET /dictionary/sync/?last_sync_timestamp=2024-03-22T10:30:45.123456Z&page=2&per_page=500
-        ```
+        Key Features:
+        - Supports incremental sync
+        - Returns only active and updated entries
+        - Provides comprehensive metadata
         """,
-        tags=['mobile'],
+        tags={'mobile'},
         manual_parameters=[
             openapi.Parameter(
                 'last_sync_timestamp',
                 openapi.IN_QUERY,
-                description="Last Synchronization Timestamp",
+                description="Last Synchronization Timestamp (ISO format)",
                 type=openapi.TYPE_STRING,
                 required=True
             ),
@@ -980,51 +979,342 @@ class DictionarySyncView(APIView):
                 type=openapi.TYPE_INTEGER,
                 default=500
             )
-        ],
-        responses={
-            200: 'Successful Sync',
-            400: 'Invalid Request'
-        }
+        ]
     )
     def get(self, request):
-        # Extract parameters
+        # Extract sync parameters
         last_sync_timestamp = request.query_params.get('last_sync_timestamp')
         page = int(request.query_params.get('page', 1))
         per_page = int(request.query_params.get('per_page', 500))
 
-        # Validate parameters
-        if not last_sync_timestamp:
-            return Response({
-                'error': 'Last Sync Timestamp is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
+        # Validate last sync timestamp
         try:
-            # Parse last sync timestamp
             last_sync = timezone.datetime.fromisoformat(last_sync_timestamp)
-        except ValueError:
+        except (ValueError, TypeError):
             return Response({
-                'error': 'Invalid timestamp format'
+                'error': 'Invalid timestamp format. Use ISO format.',
+                'example': '2024-03-22T10:30:45.123456Z'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Fetch new entries created after last sync
-        new_entries = Dictionary.objects.filter(
-            created_at__gt=last_sync
-        ).order_by('index')
+        # Query for updated and new entries
+        updated_entries = Dictionary.objects.filter(
+            Q(created_at__gt=last_sync) |  # New entries
+            Q(updated_at__gt=last_sync),   # Updated existing entries
+            is_active=True  # Only active entries
+        ).order_by('updated_at')
 
-        # Calculate pagination
+        # Pagination
+        total_entries = updated_entries.count()
+        total_pages = (total_entries + per_page - 1) // per_page
+
+        # Calculate start and end indices
         start = (page - 1) * per_page
         end = start + per_page
-        paginated_entries = new_entries[start:end]
+        paginated_entries = updated_entries[start:end]
 
         # Serialize entries
         serializer = DictionaryEntrySyncSerializer(paginated_entries, many=True)
 
         # Prepare response
-        return Response({
+        response_data = {
             'entries': serializer.data,
-            'total_new_entries': new_entries.count(),
+            'sync_metadata': {
+                'total_entries': total_entries,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': total_pages,
+                'last_sync_timestamp': last_sync_timestamp,
+                'current_sync_timestamp': timezone.now().isoformat()
+            }
+        }
+
+        return Response(response_data)
+
+def track_search_performance(func):
+    @wraps(func)
+    def wrapper(self, request, *args, **kwargs):
+        start_time = time.time()
+        try:
+            response = func(self, request, *args, **kwargs)
+
+            # Log performance metrics
+            execution_time = time.time() - start_time
+            logger.info("Search Performance: %s", {
+                'query': request.query_params.get('query'),
+                'language': request.query_params.get('language', 'ALL'),
+                'execution_time_ms': execution_time * 1000,
+                'result_count': len(response.data.get('results', [])) if hasattr(response, 'data') else 0,
+                'total_results': response.data.get('total_results', 0) if hasattr(response, 'data') else 0
+            })
+
+            return response
+        except Exception as e:
+            logger.error("Search Error: %s", str(e))
+            raise
+    return wrapper
+
+class SearchRateThrottle(UserRateThrottle):
+    scope = 'search'
+
+class DictionarySearchView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [SearchRateThrottle, AnonRateThrottle]
+
+    DEFAULT_SEARCH_FIELDS = ['word', 'definition', 'example_sentence']
+
+    def get_cache_key(self, query, language, search_fields):
+        key_components = [query, language, ','.join(search_fields)]
+        return f"dict_search_{hashlib.md5(''.join(key_components).encode()).hexdigest()}"
+
+    def build_search_query(self, query, search_fields, language):
+        field_mapping = {
+            'word': ['word_kh', 'word_en'],
+            'definition': ['word_kh_definition', 'word_en_definition'],
+            'example_sentence': ['example_sentence_kh', 'example_sentence_en']
+        }
+
+        search_conditions = []
+
+        for field in search_fields:
+            field_conditions = []
+
+            if language in ['KH-EN', 'ALL']:
+                field_conditions.extend([
+                    Q(**{f'{mapped_field}__icontains': query})
+                    for mapped_field in field_mapping[field] if 'kh' in mapped_field
+                ])
+
+            if language in ['EN-KH', 'ALL']:
+                field_conditions.extend([
+                    Q(**{f'{mapped_field}__icontains': query})
+                    for mapped_field in field_mapping[field] if 'en' in mapped_field
+                ])
+
+            if field_conditions:
+                search_conditions.append(reduce(operator.or_, field_conditions))
+
+        return reduce(operator.or_, search_conditions) if search_conditions else Q()
+
+    @swagger_auto_schema(
+        operation_description="""
+        Comprehensive Dictionary Search Endpoint
+
+        This endpoint allows flexible searching across the dictionary with multiple parameters:
+
+        Search Capabilities:
+        - Search in Khmer and English words
+        - Multiple search fields (words, definitions, example sentences)
+        - Language direction filtering
+        - Pagination support
+
+        Language Options:
+        - KH-EN: Search Khmer to English
+        - EN-KH: Search English to Khmer
+        - ALL: Search across both languages (default)
+
+        Search Fields:
+        - 'word': Search in word fields
+        - 'definition': Search in definition fields
+        - 'example_sentence': Search in example sentence fields
+
+        Recommended Use Cases:
+        1. Basic word lookup
+        ```
+        GET /api/dictionary/search/?query=hello
+        ```
+        2. Multilingual search
+        ```
+        GET /api/dictionary/search/?query=សួស្ដី&language=KH-EN&search_fields=word
+        ```
+        ```
+        GET /api/dictionary/search/?query=hello&language=EN-KH&search_fields=word
+        ```
+        3. Comprehensive content search
+        ```
+        GET /api/dictionary/search/?query=eat&page=2&per_page=20
+        ```
+        4. Complex search
+        ```
+        GET /api/dictionary/search/?query=travel&language=ALL&search_fields=definition&search_fields=example_sentence
+        ```
+        """,
+        manual_parameters=[
+            openapi.Parameter(
+                name='query',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description='Search term (required)',
+                required=True
+            ),
+            openapi.Parameter(
+                name='language',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description='Language search direction',
+                enum=['KH-EN', 'EN-KH', 'ALL'],
+                default='ALL'
+            ),
+            openapi.Parameter(
+                name='search_fields',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Items(
+                    type=openapi.TYPE_STRING,
+                    enum=['word', 'definition', 'example_sentence']
+                ),
+                description='Fields to search (default: word, definition, example_sentence)',
+                default=['word', 'definition', 'example_sentence']
+            ),
+            openapi.Parameter(
+                name='page',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description='Page number for pagination',
+                default=1
+            ),
+            openapi.Parameter(
+                name='per_page',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description='Number of results per page',
+                default=10
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Successful Search Results',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'results': openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(
+                                type=openapi.TYPE_OBJECT,
+                                properties={
+                                    'id': openapi.Schema(
+                                        type=openapi.TYPE_INTEGER,
+                                        description='Unique identifier for dictionary entry'
+                                    ),
+                                    'word_kh': openapi.Schema(
+                                        type=openapi.TYPE_STRING,
+                                        description='Khmer word'
+                                    ),
+                                    'word_en': openapi.Schema(
+                                        type=openapi.TYPE_STRING,
+                                        description='English word'
+                                    ),
+                                    'word_kh_type': openapi.Schema(
+                                        type=openapi.TYPE_STRING,
+                                        description='Khmer word type (noun, verb, etc.)'
+                                    ),
+                                    'word_en_type': openapi.Schema(
+                                        type=openapi.TYPE_STRING,
+                                        description='English word type (noun, verb, etc.)'
+                                    ),
+                                    'word_kh_definition': openapi.Schema(
+                                        type=openapi.TYPE_STRING,
+                                        description='Definition of the word in Khmer'
+                                    ),
+                                    'word_en_definition': openapi.Schema(
+                                        type=openapi.TYPE_STRING,
+                                        description='Definition of the word in English'
+                                    )
+                                }
+                            )
+                        ),
+                        'total_results': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='Total number of search results'
+                        ),
+                        'page': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='Current page number'
+                        ),
+                        'total_pages': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='Total number of pages'
+                        ),
+                        'search_query': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Original search query'
+                        ),
+                        'search_language': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Language direction used for search'
+                        ),
+                        'search_fields': openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_STRING),
+                            description='Fields used in the search'
+                        )
+                    }
+                )
+            ),
+            400: openapi.Response(
+                description='Bad Request',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'error': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Error message explaining the bad request'
+                        )
+                    }
+                )
+            )
+        }
+    )
+
+    @track_search_performance
+    def get(self, request):
+        # Extract parameters
+        query = request.query_params.get('query', '').strip()
+        language = request.query_params.get('language', 'ALL')
+        search_fields = request.query_params.getlist('search_fields') or self.DEFAULT_SEARCH_FIELDS
+        page = int(request.query_params.get('page', 1))
+        per_page = int(request.query_params.get('per_page', 10))
+
+        # Validate input
+        if not query:
+            return Response({
+                'error': 'Search query is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Generate cache key
+        cache_key = self.get_cache_key(query, language, search_fields)
+
+        # Check cache
+        cached_results = cache.get(cache_key)
+        if cached_results:
+            return Response(cached_results)
+
+        # Build search query
+        search_query = self.build_search_query(query, search_fields, language)
+
+        # Perform search
+        entries = Dictionary.objects.filter(search_query)
+
+        # Pagination
+        total_results = entries.count()
+        total_pages = (total_results + per_page - 1) // per_page
+
+        # Apply pagination
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_entries = entries[start:end]
+
+        # Prepare response
+        response_data = {
+            'results': DictionaryEntrySerializer(paginated_entries, many=True).data,
+            'total_results': total_results,
             'page': page,
-            'per_page': per_page,
-            'total_pages': (new_entries.count() + per_page - 1) // per_page,
-            'last_sync_timestamp': timezone.now().isoformat()
-        })
+            'total_pages': total_pages,
+            'search_query': query,
+            'search_language': language,
+            'search_fields': search_fields
+        }
+
+        # Cache results
+        cache.set(cache_key, response_data, timeout=3600)
+
+        return Response(response_data)
