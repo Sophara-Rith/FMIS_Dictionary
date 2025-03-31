@@ -3,6 +3,7 @@ import time
 import logging
 from functools import wraps, reduce
 import operator
+import traceback
 import uuid
 import hashlib
 from rest_framework import status
@@ -25,6 +26,7 @@ from .serializers import (
     StagingEntryCreateSerializer,
     DictionaryEntrySyncSerializer
 )
+from debug_utils import debug_error
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,7 @@ class DictionaryEntryListView(APIView):
             )
         }
     )
+    @debug_error
     def get(self, request):
         # Get query parameters
         language = request.query_params.get('language')
@@ -107,6 +110,7 @@ class DictionaryEntryDetailView(APIView):
             404: 'Entry Not Found'
         }
     )
+    @debug_error
     def get(self, request, pk):
         try:
             entry = Dictionary.objects.get(pk=pk)
@@ -142,6 +146,7 @@ class StagingEntryListView(APIView):
             )
         }
     )
+    @debug_error
     def get(self, request):
         entries = Staging.objects.all()
         serializer = StagingEntrySerializer(entries, many=True)
@@ -154,25 +159,56 @@ class StagingEntryCreateView(APIView):
         operation_description="Create a new staging entry for dictionary",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['word', 'definition', 'language'],
+            required=[
+                'word_kh',
+                'word_kh_type',
+                'word_kh_definition',
+                'word_en',
+                'word_en_type',
+                'word_en_definition'
+            ],
             properties={
-                'word': openapi.Schema(
+                'word_kh': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="The word to be added"
+                    description="Khmer word"
                 ),
-                'definition': openapi.Schema(
+                'word_kh_type': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="Definition of the word"
+                    description="Khmer word type",
+                    enum=[choice[0] for choice in WordType.WORD_TYPE_CHOICES_KH]
                 ),
-                'language': openapi.Schema(
+                'word_kh_definition': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="Language of the entry (KH-EN or EN-KH)",
-                    enum=['KH-EN', 'EN-KH']
+                    description="Definition of the Khmer word"
                 ),
-                'examples': openapi.Schema(
-                    type=openapi.TYPE_ARRAY,
-                    items=openapi.Schema(type=openapi.TYPE_STRING),
-                    description="Example usages of the word"
+                'word_en': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="English word"
+                ),
+                'word_en_type': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="English word type",
+                    enum=[choice[0] for choice in WordType.WORD_TYPE_CHOICES_EN]
+                ),
+                'word_en_definition': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Definition of the English word"
+                ),
+                'pronunciation_kh': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Pronunciation of the Khmer word (optional)"
+                ),
+                'pronunciation_en': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Pronunciation of the English word (optional)"
+                ),
+                'example_sentence_kh': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Example sentence in Khmer (optional)"
+                ),
+                'example_sentence_en': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Example sentence in English (optional)"
                 )
             }
         ),
@@ -182,16 +218,23 @@ class StagingEntryCreateView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'word': openapi.Schema(type=openapi.TYPE_STRING),
-                        'definition': openapi.Schema(type=openapi.TYPE_STRING),
-                        'submitted_by': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                        'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                        'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                        'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
+                        'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                        'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
                     }
                 )
             ),
             400: 'Validation Error'
         }
     )
+    @debug_error
     def post(self, request):
         serializer = StagingEntryCreateSerializer(
             data=request.data,
@@ -199,9 +242,9 @@ class StagingEntryCreateView(APIView):
         )
         if serializer.is_valid():
             serializer.save()
-            return Response(
-                serializer.data,
-                status=status.HTTP_201_CREATED
+            return Response({
+                'message': 'Data successfully insert.'
+            },status=status.HTTP_201_CREATED
             )
         return Response(
             serializer.errors,
@@ -234,29 +277,68 @@ class StagingEntryApproveView(APIView):
             404: 'Staging Entry Not Found'
         }
     )
+    @debug_error
     def post(self, request, pk):
         try:
+            # Retrieve the staging entry
             staging_entry = Staging.objects.get(pk=pk)
 
-            # Create dictionary entry
+            # Create dictionary entry with all relevant fields
             dictionary_entry = Dictionary.objects.create(
-                word=staging_entry.word,
-                definition=staging_entry.definition,
-                language=staging_entry.language,
-                examples=staging_entry.examples
+                index=staging_entry.id,
+
+                # Core word fields
+                word_kh=staging_entry.word_kh,
+                word_en=staging_entry.word_en,
+
+                # Word type fields
+                word_kh_type=staging_entry.word_kh_type,
+                word_en_type=staging_entry.word_en_type,
+
+                # Definition fields
+                word_kh_definition=staging_entry.word_kh_definition,
+                word_en_definition=staging_entry.word_en_definition,
+
+                # Optional fields
+                pronunciation_kh=staging_entry.pronunciation_kh,
+                pronunciation_en=staging_entry.pronunciation_en,
+                example_sentence_kh=staging_entry.example_sentence_kh,
+                example_sentence_en=staging_entry.example_sentence_en,
+
+                # Metadata
+                created_by=request.user,  # The admin who approves the entry
+                created_at=timezone.now()
             )
 
-            # Delete staging entry
+            # Update staging entry status
+            staging_entry.review_status = 'APPROVED'
+            staging_entry.reviewed_by = request.user
+            staging_entry.reviewed_at = timezone.now()
+            staging_entry.save()
+
+            # Delete the staging entry after approval
             staging_entry.delete()
 
             return Response({
                 'message': 'Entry approved and added to dictionary',
-                'entry': DictionaryEntrySerializer(dictionary_entry).data
+                'entry': {
+                    'id': dictionary_entry.index,
+                    'word_kh': dictionary_entry.word_kh,
+                    'word_en': dictionary_entry.word_en
+                }
             }, status=status.HTTP_200_OK)
+
         except Staging.DoesNotExist:
             return Response(
                 {'error': 'Staging entry not found'},
                 status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            # Log the error for debugging
+            logger.error(f"Error approving staging entry: {str(e)}")
+            return Response(
+                {'error': 'An error occurred while approving the entry'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 class StagingEntryRejectView(APIView):
@@ -278,6 +360,7 @@ class StagingEntryRejectView(APIView):
             404: 'Staging Entry Not Found'
         }
     )
+    @debug_error
     def post(self, request, pk):
         try:
             staging_entry = Staging.objects.get(pk=pk)
@@ -325,6 +408,7 @@ class StagingEntryDetailView(APIView):
             404: 'Staging Entry Not Found'
         }
     )
+    @debug_error
     def get(self, request, pk):
         try:
             staging_entry = Staging.objects.get(pk=pk)
@@ -378,6 +462,7 @@ class StagingEntryUpdateView(APIView):
             404: 'Staging entry not found'
         }
     )
+    @debug_error
     def put(self, request, pk):
         try:
             staging_entry = Staging.objects.get(pk=pk)
@@ -429,6 +514,7 @@ class StagingEntryDeleteView(APIView):
             404: 'Staging entry not found'
         }
     )
+    @debug_error
     def delete(self, request, pk):
         try:
             staging_entry = Staging.objects.get(pk=pk)
@@ -547,50 +633,68 @@ class BookmarkView(APIView):
             404: 'Not Found - Word Does Not Exist'
         }
     )
+    @debug_error
     def post(self, request):
-        """
-        Add a bookmark for a word
-        """
-
         try:
             # Validate device ID
             device_id = self.validate_device_id(request)
 
-            # Get word ID from request
+            # Print debug information
+            print("🔖 DEBUG: Creating Bookmark")
+            print(f"🔑 Device ID: {device_id}")
+            print(f"📦 Request Data: {request.data}")
+
+            # Validate word_id is provided
             word_id = request.data.get('word_id')
             if not word_id:
                 return Response({
-                    'error': 'Word ID is required'
+                    'error': 'word_id is required'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Find the word
+            # Check if word exists
             try:
                 word = Dictionary.objects.get(id=word_id)
             except Dictionary.DoesNotExist:
                 return Response({
-                    'error': 'Word not found'
+                    'error': f'Word with id {word_id} does not exist'
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            # Create or get bookmark
-            bookmark, created = Bookmark.objects.get_or_create(
+            # Check if bookmark already exists
+            existing_bookmark = Bookmark.objects.filter(
+                device_id=device_id,
+                word=word
+            ).first()
+
+            if existing_bookmark:
+                return Response({
+                    'message': 'Bookmark already exists',
+                    'bookmark_id': existing_bookmark.id
+                }, status=status.HTTP_200_OK)
+
+            # Create new bookmark
+            bookmark = Bookmark.objects.create(
                 device_id=device_id,
                 word=word
             )
 
-            # Serialize and return word details
+            # Serialize and return
             serializer = BookmarkSerializer(bookmark)
-            return Response({
-                'message': 'Bookmark added successfully' if created else 'Bookmark already exists',
-                'bookmark': serializer.data
-            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        except ValueError as e:
+        except ValueError as ve:
             return Response({
-                'error': str(e)
+                'error': str(ve)
             }, status=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
+            # Log detailed error
+            logger.error(f"Bookmark Creation Error: {str(e)}")
+            print("❌ Bookmark Creation Error:")
+            traceback.print_exc()
+
             return Response({
-                'error': 'An unexpected error occurred'
+                'error': 'Failed to create bookmark',
+                'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @swagger_auto_schema(
@@ -664,6 +768,7 @@ class BookmarkView(APIView):
             401: 'Unauthorized - Invalid Authentication'
         }
     )
+    @debug_error
     def get(self, request):
         """
         Retrieve bookmarks for a device
@@ -744,43 +849,57 @@ class BookmarkView(APIView):
             404: 'Not Found - Bookmark Does Not Exist'
         }
     )
+    @debug_error
     def delete(self, request):
         """
-        Remove a bookmark
+        Delete a bookmark
         """
         try:
             # Validate device ID
             device_id = self.validate_device_id(request)
 
-            # Get word ID to remove
+            # Print debug information
+            print("🔖 DEBUG: Deleting Bookmark")
+            print(f"🔑 Device ID: {device_id}")
+            print(f"📦 Request Data: {request.data}")
+
+            # Validate word_id is provided
             word_id = request.data.get('word_id')
             if not word_id:
                 return Response({
-                    'error': 'Word ID is required'
+                    'error': 'word_id is required'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Find and delete bookmark
-            try:
-                bookmark = Bookmark.objects.get(
-                    device_id=device_id,
-                    word_id=word_id
-                )
-                bookmark.delete()
-                return Response({
-                    'message': 'Bookmark removed successfully'
-                }, status=status.HTTP_200_OK)
-            except Bookmark.DoesNotExist:
+            # Find and delete the bookmark
+            bookmark = Bookmark.objects.filter(
+                device_id=device_id,
+                word_id=word_id
+            ).first()
+
+            if not bookmark:
                 return Response({
                     'error': 'Bookmark not found'
                 }, status=status.HTTP_404_NOT_FOUND)
 
-        except ValueError as e:
+            bookmark.delete()
             return Response({
-                'error': str(e)
+                'message': 'Bookmark deleted successfully'
+            }, status=status.HTTP_200_OK)
+
+        except ValueError as ve:
+            return Response({
+                'error': str(ve)
             }, status=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
+            # Log detailed error
+            logger.error(f"Bookmark Deletion Error: {str(e)}")
+            print("❌ Bookmark Deletion Error:")
+            traceback.print_exc()
+
             return Response({
-                'error': 'An unexpected error occurred'
+                'error': 'Failed to delete bookmark',
+                'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class DictionarySyncAllView(APIView):
@@ -857,6 +976,7 @@ class DictionarySyncAllView(APIView):
             429: 'Too Many Requests'
         }
     )
+    @debug_error
     def get(self, request):
         # Generate unique sync request ID for tracking
         sync_id = str(uuid.uuid4())
@@ -981,6 +1101,7 @@ class DictionarySyncView(APIView):
             )
         ]
     )
+    @debug_error
     def get(self, request):
         # Extract sync parameters
         last_sync_timestamp = request.query_params.get('last_sync_timestamp')
@@ -1264,7 +1385,7 @@ class DictionarySearchView(APIView):
             )
         }
     )
-
+    @debug_error
     @track_search_performance
     def get(self, request):
         # Extract parameters

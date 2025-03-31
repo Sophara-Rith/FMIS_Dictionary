@@ -1,9 +1,9 @@
+# dictionary_project/settings.py
 import os
 from pathlib import Path
 from datetime import timedelta
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 # Mobile Sync Credentials
@@ -122,6 +122,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': os.getenv('ANON_RATE', '100/day'),
         'user': os.getenv('USER_RATE', '1000/day'),
+        'search': os.getenv('SEARCH', '20/minute')
     }
 }
 
@@ -183,16 +184,38 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{asctime}] {levelname} {module} {process:d} {thread:d} - {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'file': {
             'level': 'ERROR',
             'class': 'logging.FileHandler',
-            'filename': 'debug.log',
+            'filename': 'error_debug.log',
+            'formatter': 'verbose',
+        },
+        'console': {
+            'level': 'ERROR',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
         },
     },
     'loggers': {
         'django': {
-            'handlers': ['file'],
+            'handlers': ['file', 'console'],
+            'level': 'ERROR',
+            'propagate': True,
+        },
+        'users': {
+            'handlers': ['file', 'console'],
+            'level': 'ERROR',
+            'propagate': True,
+        },
+        'dictionary': {
+            'handlers': ['file', 'console'],
             'level': 'ERROR',
             'propagate': True,
         },

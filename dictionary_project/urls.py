@@ -1,3 +1,4 @@
+# dictionary_project/urls.py
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework import permissions
@@ -12,7 +13,7 @@ from users.views import CustomTokenObtainPairView
 schema_view = get_schema_view(
    openapi.Info(
       title="Dictionary API",
-      default_version='v1',
+      default_version='v0.8',
       description="Dictionary API Documentation",
       terms_of_service="https://www.yourapp.com/terms/",
       contact=openapi.Contact(email="contact@yourapp.com"),

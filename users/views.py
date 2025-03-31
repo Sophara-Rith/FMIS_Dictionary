@@ -13,6 +13,7 @@ from .models import MobileDevice, User
 from .serializers import UserSerializer, CustomTokenObtainPairSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+from debug_utils import debug_error
 
 User = get_user_model()
 
@@ -41,6 +42,7 @@ class UserLoginView(APIView):
             401: 'Authentication Failed'
         }
     )
+    @debug_error
     def post(self, request):
         # Extract login credentials
         login_input = request.data.get('login_input', '').strip()
@@ -135,7 +137,7 @@ class UserRegisterView(APIView):
             400: 'Registration Error'
         }
     )
-
+    @debug_error
     def post(self, request):
         if request.user.role not in ['SUPERUSER', 'ADMIN']:
             return Response({
@@ -222,7 +224,7 @@ class UserDropView(APIView):
             )
         }
     )
-
+    @debug_error
     def delete(self, request):
         # Multiple ways to identify user for deletion
         user_id = request.query_params.get('id')
@@ -320,10 +322,11 @@ class UserUpdateView(APIView):
             403: 'Unauthorized'
         }
     )
-
+    @debug_error
     def patch(self, request):
         return self._update_user(request, partial=True)
 
+    @debug_error
     def put(self, request):
         # User identification logic
         user_id = request.query_params.get('id')
@@ -430,7 +433,7 @@ class UserListView(APIView):
             403: 'Unauthorized'
         }
     )
-
+    @debug_error
     def get(self, request):
         # Support pagination and filtering
         page = int(request.query_params.get('page', 1))
@@ -464,6 +467,7 @@ class UserListView(APIView):
 class UserDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @debug_error
     def get(self, request):
         user_id = request.query_params.get('id')
         username = request.query_params.get('username')
@@ -524,6 +528,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             400: 'Invalid Credentials'
         }
     )
+    @debug_error
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
 
@@ -564,13 +569,13 @@ class MobileLoginView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'access_token': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='JWT Access Token'
-                        ),
-                        'refresh_token': openapi.Schema(
+                        'refresh': openapi.Schema(
                             type=openapi.TYPE_STRING,
                             description='JWT Refresh Token'
+                        ),
+                        'access': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='JWT Access Token'
                         ),
                         'device_id': openapi.Schema(
                             type=openapi.TYPE_STRING,
@@ -582,6 +587,7 @@ class MobileLoginView(APIView):
             400: 'Bad Request - Missing Device ID'
         }
     )
+    @debug_error
     def post(self, request):
         device_id = request.data.get('device_id')
 
@@ -614,8 +620,8 @@ class MobileLoginView(APIView):
         tokens = mobile_device.generate_device_tokens(user)
 
         return Response({
-            'access_token': tokens['access_token'],
-            'refresh_token': tokens['refresh_token'],
+            'refresh': tokens['refresh_token'],
+            'access': tokens['access_token'],
             'device_id': device_id
         })
 
@@ -664,6 +670,7 @@ class CustomTokenRefreshView(TokenRefreshView):
             400: 'Bad Request - Invalid Device or Token'
         }
     )
+    @debug_error
     def post(self, request, *args, **kwargs):
         # Get device ID from request
         device_id = request.headers.get('X-Device-ID')

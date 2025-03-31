@@ -86,14 +86,40 @@ class StagingEntryCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Staging
         fields = [
-            'word_kh', 'word_en',
-            'word_kh_type', 'word_en_type',
-            'word_kh_definition', 'word_en_definition',
-            'pronunciation_kh', 'pronunciation_en',
-            'example_sentence_kh', 'example_sentence_en'
+            'word_kh',
+            'word_kh_type',
+            'word_kh_definition',
+            'word_en',
+            'word_en_type',
+            'word_en_definition',
+            'pronunciation_kh',
+            'pronunciation_en',
+            'example_sentence_kh',
+            'example_sentence_en'
         ]
+        extra_kwargs = {
+            'pronunciation_kh': {'required': False},
+            'pronunciation_en': {'required': False},
+            'example_sentence_kh': {'required': False},
+            'example_sentence_en': {'required': False}
+        }
 
     def validate(self, data):
+        # Validate required fields
+        required_fields = [
+            'word_kh',
+            'word_kh_type',
+            'word_kh_definition',
+            'word_en',
+            'word_en_type',
+            'word_en_definition'
+        ]
+        for field in required_fields:
+            if not data.get(field):
+                raise serializers.ValidationError({
+                    field: f"{field.replace('_', ' ').title()} is required"
+                })
+
         # Validate word type consistency
         en_type = data.get('word_en_type')
         kh_type = data.get('word_kh_type')

@@ -39,6 +39,8 @@ class Staging(models.Model):
         ('EN-KH', 'English to Khmer')
     ]
 
+    id = models.BigAutoField(primary_key=True)
+
     # Word Fields
     word_kh = models.CharField(
         max_length=255,
@@ -132,87 +134,34 @@ class Staging(models.Model):
         return f"{self.word_kh} ({self.word_en})"
 
 class Dictionary(models.Model):
-    # Khmer Word Fields
-    word_kh = models.CharField(
-        max_length=255,
-        verbose_name='Khmer Word',
-        db_index=True
-    )
-    word_kh_type = models.CharField(
-        max_length=50,
-        choices=[
-            ('noun', 'Noun'),
-            ('verb', 'Verb'),
-            ('adjective', 'Adjective'),
-            ('adverb', 'Adverb'),
-            ('pronoun', 'Pronoun'),
-            ('preposition', 'Preposition'),
-            ('conjunction', 'Conjunction'),
-            ('interjection', 'Interjection')
-        ]
-    )
-    word_kh_definition = models.TextField(
-        verbose_name='Khmer Word Definition',
-        db_index=True
-    )
+    # Ensure you have an 'id' field (which should be automatic)
+    id = models.AutoField(primary_key=True)
 
-    # English Word Fields
-    word_en = models.CharField(
-        max_length=255,
-        verbose_name='English Word',
-        db_index=True
-    )
-    word_en_type = models.CharField(
-        max_length=50,
-        choices=[
-            ('noun', 'Noun'),
-            ('verb', 'Verb'),
-            ('adjective', 'Adjective'),
-            ('adverb', 'Adverb'),
-            ('pronoun', 'Pronoun'),
-            ('preposition', 'Preposition'),
-            ('conjunction', 'Conjunction'),
-            ('interjection', 'Interjection')
-        ]
-    )
-    word_en_definition = models.TextField(
-        verbose_name='English Word Definition',
-        db_index=True
-    )
+    word_kh = models.CharField(max_length=255)
+    word_en = models.CharField(max_length=255)
+    word_kh_type = models.CharField(max_length=50)
+    word_en_type = models.CharField(max_length=50)
+    word_kh_definition = models.TextField()
+    word_en_definition = models.TextField()
 
-    # Example Sentences
-    example_sentence_kh = models.TextField(
-        null=True,
-        blank=True,
-        verbose_name='Example Sentence in Khmer',
-        db_index=True
-    )
-    example_sentence_en = models.TextField(
-        null=True,
-        blank=True,
-        verbose_name='Example Sentence in English',
-        db_index=True
-    )
+    # Optional fields
+    pronunciation_kh = models.CharField(max_length=255, null=True, blank=True)
+    pronunciation_en = models.CharField(max_length=255, null=True, blank=True)
+    example_sentence_kh = models.TextField(null=True, blank=True)
+    example_sentence_en = models.TextField(null=True, blank=True)
 
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    is_active = models.BooleanField(default=True)
-
-    # Metadata
-    created_at = models.DateTimeField(default=timezone.now)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
-        null=True
+        null=True,
+        related_name='dictionary_entries'
     )
 
     class Meta:
         verbose_name_plural = 'Dictionary Entries'
-        indexes = [
-            # Multilingual full-text search optimization
-            models.Index(fields=['word_kh', 'word_en']),
-            models.Index(fields=['word_kh_definition', 'word_en_definition']),
-            models.Index(fields=['example_sentence_kh', 'example_sentence_en']),
-        ]
+        ordering = ['-created_at']
 
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"
@@ -235,7 +184,8 @@ class Bookmark(models.Model):
             models.Index(fields=['last_accessed']),
             models.Index(fields=['access_count'])
         ]
+        verbose_name_plural = 'Bookmarks'
 
     def __str__(self):
-        return f"{self.device_id} - {self.word.word_kh}"
+        return f"Bookmark: {self.word.word_kh} - Device: {self.device_id}"
 

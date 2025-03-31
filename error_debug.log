@@ -1,0 +1,7 @@
+[2025-03-31 15:34:30,454] ERROR log 18312 6872 - Internal Server Error: /api/dictionary/bookmarks/
+[2025-03-31 15:34:30,455] ERROR basehttp 18312 6872 - "POST /api/dictionary/bookmarks/ HTTP/1.1" 500 40
+[2025-03-31 15:38:40,633] ERROR views 16452 11212 - Bookmark Creation Error: Cannot resolve keyword 'id' into field. Choices are: bookmarks, created_at, created_by, created_by_id, example_sentence_en, example_sentence_kh, index, pronunciation_en, pronunciation_kh, updated_at, word_en, word_en_definition, word_en_type, word_kh, word_kh_definition, word_kh_type
+[2025-03-31 15:38:40,707] ERROR log 16452 11212 - Internal Server Error: /api/dictionary/bookmarks/
+[2025-03-31 15:38:40,708] ERROR basehttp 16452 11212 - "POST /api/dictionary/bookmarks/ HTTP/1.1" 500 334
+[2025-03-31 15:42:56,060] ERROR log 15132 18060 - Internal Server Error: /api/dictionary/bookmarks/
+[2025-03-31 15:42:56,061] ERROR basehttp 15132 18060 - "POST /api/dictionary/bookmarks/ HTTP/1.1" 500 122
