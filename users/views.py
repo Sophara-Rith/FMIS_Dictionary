@@ -4,16 +4,15 @@ from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from .models import MobileDevice, User
-from .serializers import UserSerializer, CustomTokenObtainPairSerializer
+from .serializers import UserSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from debug_utils import debug_error
 
 User = get_user_model()
 
@@ -37,12 +36,25 @@ class UserLoginView(APIView):
             }
         ),
         responses={
-            200: 'Successful Login',
-            400: 'Invalid Credentials',
-            401: 'Authentication Failed'
+            200: openapi.Response(
+                description='Successful Login',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'refresh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'access': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
+                    }
+                )
+            )
         }
     )
-    @debug_error
     def post(self, request):
         # Extract login credentials
         login_input = request.data.get('login_input', '').strip()
@@ -51,146 +63,331 @@ class UserLoginView(APIView):
         # Validate input fields
         if not login_input or not password:
             return Response({
-                'error': 'Username/Email and password are required',
-                'details': {
-                    'login_input': 'Login input cannot be empty',
-                    'password': 'Password cannot be empty'
-                }
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Username/Email and password are required',
+                'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             # Attempt to authenticate user
-            # Check if login_input is email or username
             user = None
             if '@' in login_input:
-                # Login with email
                 user = User.objects.filter(email=login_input).first()
             else:
-                # Login with username
                 user = User.objects.filter(username=login_input).first()
 
             # Validate user and password
             if user and user.check_password(password):
                 # Generate tokens
                 refresh = RefreshToken.for_user(user)
+
                 return Response({
-                    'refresh': str(refresh),
-                    'access': str(refresh.access_token),
-                    'user': {
-                        'id': user.id,
-                        'username': user.username,
-                        'email': user.email,
-                        'role': user.role
+                    'responseCode': status.HTTP_200_OK,
+                    'message': 'Login successful',
+                    'data': {
+                        'refresh': str(refresh),
+                        'access': str(refresh.access_token)
                     }
                 }, status=status.HTTP_200_OK)
             else:
                 # Invalid credentials
                 return Response({
-                    'error': 'Invalid login credentials',
-                    'details': 'Username/Email or password is incorrect'
+                    'responseCode': status.HTTP_401_UNAUTHORIZED,
+                    'message': 'Invalid login credentials',
+                    'data': None
                 }, status=status.HTTP_401_UNAUTHORIZED)
 
         except Exception as e:
-            # Log the error for debugging
-            logger.error(f"Login Error: {str(e)}")
             return Response({
-                'error': 'An unexpected error occurred during login',
-                'details': str(e)
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'An unexpected error occurred during login',
+                'data': None
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UserListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="View list of all users",
+        responses={
+            200: openapi.Response(
+                description='Users retrieved successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT
+                        )
+                    }
+                )
+            ),
+            401: openapi.Response(
+                description='Unauthorized Access',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            )
+        }
+    )
+    def get(self, request):
+        # Explicit check for authentication
+        if not request.user or not request.user.is_authenticated:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Authentication credentials were not provided or are invalid',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Check for admin/superuser permissions
+        if request.user.role not in ['ADMIN', 'SUPERUSER']:
+            return Response({
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'You do not have permission to perform this action',
+                'data': None
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Pagination and filtering logic
+            page = int(request.query_params.get('page', 1))
+            per_page = int(request.query_params.get('per_page', 25))
+            role = request.query_params.get('role')
+            is_active = request.query_params.get('is_active')
+
+            # Base queryset
+            users = User.objects.all()
+
+            # Apply filters
+            if role:
+                users = users.filter(role=role)
+            if is_active is not None:
+                users = users.filter(is_active=is_active.lower() == 'true')
+
+            # Pagination
+            start = (page - 1) * per_page
+            end = start + per_page
+            paginated_users = users[start:end]
+
+            # Transform data
+            user_data = [{
+                'username': user.username,
+                'email': user.email,
+                'role': user.role
+            } for user in paginated_users]
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Data retrieved successfully',
+                'data': {
+                    'users': user_data
+                },
+                'total_users': users.count(),
+                'page': page,
+                'per_page': per_page,
+                'total_pages': (users.count() + per_page - 1) // per_page
+            })
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Authentication failed',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+class UserDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve user details",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="User ID",
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                'username',
+                openapi.IN_QUERY,
+                description="Username",
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                'email',
+                openapi.IN_QUERY,
+                description="User Email",
+                type=openapi.TYPE_STRING
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='User profile retrieved successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                'role': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
+                    }
+                )
+            )
+        }
+    )
+    def get(self, request):
+        user_id = request.query_params.get('id')
+        username = request.query_params.get('username')
+        email = request.query_params.get('email')
+
+        try:
+            # Find user based on provided parameters
+            if user_id:
+                user = get_object_or_404(User, id=user_id)
+            elif username:
+                user = get_object_or_404(User, username=username)
+            elif email:
+                user = get_object_or_404(User, email=email)
+            else:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Identification parameter (id/username/email) is required',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Ensure user can only access their own profile or admin can access all
+            if request.user.id != user.id and request.user.role not in ['ADMIN', 'SUPERUSER']:
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'Not authorized to view this user profile',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Transform user data to match desired structure
+            user_data = {
+                'username': user.username,
+                'email': user.email,
+                'role': user.role
+            }
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'User profile retrieved successfully',
+                'data': user_data
+            })
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': str(e),
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 class UserRegisterView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         operation_description="User Registration",
-        manual_parameters=[
-
-        ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=['username', 'email', 'password', 'role'],
             properties={
-                'username': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="Username"
-                ),
-                'email': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="FMIS email address"
-                ),
-                'password': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="User password"
-                ),
-                'phone_number': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="Phone number"
-                ),
-                'role': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="USER , ADMIN"
-                )
+                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                'email': openapi.Schema(type=openapi.TYPE_STRING),
+                'password': openapi.Schema(type=openapi.TYPE_STRING),
+                'role': openapi.Schema(type=openapi.TYPE_STRING)
             }
         ),
         responses={
-            201: 'User Created Successfully',
-            400: 'Registration Error'
+            201: openapi.Response(
+                description='User Created Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                    }
+                )
+            ),
+            401: openapi.Response(
+                description='Unauthorized',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            )
         }
     )
-    @debug_error
     def post(self, request):
-        if request.user.role not in ['SUPERUSER', 'ADMIN']:
+        # Check authentication
+        if not request.user or not request.user.is_authenticated:
             return Response({
-                'error': 'You don\'t have the permission to perform this action.'
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Authentication required',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Check authorization
+        if request.user.role not in ['ADMIN', 'SUPERUSER']:
+            return Response({
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'You do not have permission to perform this action',
+                'data': None
             }, status=status.HTTP_403_FORBIDDEN)
 
-        requested_role = request.data.get('role', 'USER')
+        try:
+            serializer = UserSerializer(data=request.data)
 
-        if request.user.role == 'ADMIN' and requested_role == 'SUPERUSER':
-            return Response({
-                'error': 'ADMIN cannot create SUPERUSER accounts'
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        serializer = UserSerializer(data=request.data)
-
-        if serializer.is_valid():
-            try:
-                user = serializer.save(role=requested_role)
+            if serializer.is_valid():
+                user = serializer.save()
                 return Response({
+                    'responseCode': status.HTTP_201_CREATED,
                     'message': 'User registered successfully',
-                    'user': UserSerializer(user).data
+                    'data': {
+                        'username': user.username,
+                        'email': user.email,
+                        'role': user.role
+                    }
                 }, status=status.HTTP_201_CREATED)
-            except Exception as e:
-                return Response({
-                    'error': str(e)
-                }, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Validation error',
+                'data': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Registration failed',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserDropView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Delete User Account (Admin Only)",
+        operation_description="Delete User Account",
         manual_parameters=[
-            openapi.Parameter(
-                'id',
-                openapi.IN_QUERY,
-                description="User ID for deletion",
-                type=openapi.TYPE_STRING
-            ),
-            openapi.Parameter(
-                'username',
-                openapi.IN_QUERY,
-                description="Username for deletion",
-                type=openapi.TYPE_STRING
-            ),
-            openapi.Parameter(
-                'email',
-                openapi.IN_QUERY,
-                description="User email for deletion",
-                type=openapi.TYPE_STRING
-            )
+            openapi.Parameter('id', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('username', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('email', openapi.IN_QUERY, type=openapi.TYPE_STRING)
         ],
         responses={
             200: openapi.Response(
@@ -198,41 +395,50 @@ class UserDropView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Deletion success message'
-                        ),
-                        'deleted_user': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'id': openapi.Schema(
-                                    type=openapi.TYPE_INTEGER,
-                                    description='Deleted user ID'
-                                ),
-                                'username': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    description='Deleted username'
-                                ),
-                                'email': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    description='Deleted user email'
-                                )
-                            }
-                        )
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                    }
+                )
+            ),
+            403: openapi.Response(
+                description='Forbidden',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
                     }
                 )
             )
         }
     )
-    @debug_error
     def delete(self, request):
-        # Multiple ways to identify user for deletion
-        user_id = request.query_params.get('id')
-        username = request.query_params.get('username')
-        email = request.query_params.get('email')
+        # Check authentication
+        if not request.user or not request.user.is_authenticated:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Authentication required',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Check authorization
+        if request.user.role not in ['ADMIN', 'SUPERUSER']:
+            return Response({
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'You do not have permission to perform this action',
+                'data': None
+            }, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            # Find user based on provided parameters
+            # User identification parameters
+            user_id = request.query_params.get('id')
+            username = request.query_params.get('username')
+            email = request.query_params.get('email')
+
+            # Find user
+            user = None
             if user_id:
                 user = get_object_or_404(User, id=user_id)
             elif username:
@@ -241,58 +447,61 @@ class UserDropView(APIView):
                 user = get_object_or_404(User, email=email)
             else:
                 return Response({
-                    'error': 'Identification parameter (id/username/email) is required'
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Identification parameter required',
+                    'data': None
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             # Prevent deleting own account
             if request.user.id == user.id:
                 return Response({
-                    'error': 'Cannot delete your own account'
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Cannot delete own account',
+                    'data': None
                 }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Specific check: Only SUPERUSER can delete ADMIN accounts
+            if user.role == 'ADMIN' and request.user.role != 'SUPERUSER':
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'Only SUPERUSER can delete ADMIN accounts',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
 
             # Store user details before deletion
             user_details = {
-                'id': user.id,
                 'username': user.username,
-                'email': user.email
+                'email': user.email,
+                'role': user.role
             }
 
+            # Delete user
             user.delete()
+
             return Response({
+                'responseCode': status.HTTP_200_OK,
                 'message': 'User deleted successfully',
-                'deleted_user': user_details
-            }, status=status.HTTP_200_OK)
+                'data': user_details
+            })
+
         except Exception as e:
             return Response({
-                'error': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Deletion failed',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserUpdateView(APIView):
-    @swagger_auto_schema(
-        operation_description="Update User Profile (Preserves original values if not provided)",
-        manual_parameters=[
+    permission_classes = [IsAuthenticated]
 
-        ],
+    @swagger_auto_schema(
+        operation_description="Update User Profile",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
-                'role': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="User role (ADMIN/USER, admin only)",
-                    enum=['USER', 'ADMIN']
-                ),
-                'email': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="New email address"
-                ),
-                'password': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="New password"
-                ),
-                'phone_number': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="New phone number"
-                )
+                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                'email': openapi.Schema(type=openapi.TYPE_STRING),
+                'role': openapi.Schema(type=openapi.TYPE_STRING)
             }
         ),
         responses={
@@ -301,84 +510,42 @@ class UserUpdateView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Update success message'
-                        ),
-                        'user': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'username': openapi.Schema(type=openapi.TYPE_STRING),
-                                'email': openapi.Schema(type=openapi.TYPE_STRING),
-                                'role': openapi.Schema(type=openapi.TYPE_STRING),
-                                'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
-                            }
-                        )
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
                     }
                 )
             ),
-            400: 'Validation Error',
-            403: 'Unauthorized'
+            401: openapi.Response(
+                description='Unauthorized',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            )
         }
     )
-    @debug_error
-    def patch(self, request):
-        return self._update_user(request, partial=True)
-
-    @debug_error
     def put(self, request):
-        # User identification logic
-        user_id = request.query_params.get('id')
-        username = request.query_params.get('username')
-        email = request.query_params.get('email')
+        # Check authentication
+        if not request.user or not request.user.is_authenticated:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Authentication required',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
-            # Find user based on provided parameters
-            if user_id:
-                user = get_object_or_404(User, id=user_id)
-            elif username:
-                user = get_object_or_404(User, username=username)
-            elif email:
-                user = get_object_or_404(User, email=email)
-            else:
-                return Response({
-                    'error': 'Identification parameter (id/username/email) is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            # Find user to update
+            user = request.user
 
-            # Check authorization
-            if request.user.id != user.id and request.user.role not in ['ADMIN', 'SUPERUSER']:
-                return Response({
-                    'error': 'Not authorized to update this user'
-                }, status=status.HTTP_403_FORBIDDEN)
-
-            # Prepare update data
-            update_data = {}
-
-            # Check and add each field if provided in the request
-            if 'role' in request.data:
-                update_data['role'] = request.data['role']
-
-            if 'email' in request.data:
-                update_data['email'] = request.data['email']
-
-            if 'password' in request.data:
-                update_data['password'] = request.data['password']
-
-            if 'phone_number' in request.data:
-                update_data['phone_number'] = request.data['phone_number']
-
-            # If no data provided, return current user data
-            if not update_data:
-                return Response({
-                    'message': 'No update data provided',
-                    'user': UserSerializer(user).data
-                }, status=status.HTTP_200_OK)
-
-            # Add request to serializer context for role validation
+            # Validate and update user
             serializer = UserSerializer(
                 user,
-                data=update_data,
+                data=request.data,
                 partial=True,
                 context={'request': request}
             )
@@ -386,268 +553,152 @@ class UserUpdateView(APIView):
             if serializer.is_valid():
                 updated_user = serializer.save()
                 return Response({
+                    'responseCode': status.HTTP_200_OK,
                     'message': 'User updated successfully',
-                    'user': UserSerializer(updated_user).data,
-                    'update_method': 'id' if user_id else 'username' if username else 'email'
-                }, status=status.HTTP_200_OK)
-
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception as e:
-            return Response({
-                'error': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-class UserListView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminUser]
-
-    @swagger_auto_schema(
-        operation_description="View list of all user",
-        manual_parameters=[
-
-        ],
-        responses={
-            200: openapi.Response(
-                description='User Updated Successfully',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Update success message'
-                        ),
-                        'user': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'username': openapi.Schema(type=openapi.TYPE_STRING),
-                                'email': openapi.Schema(type=openapi.TYPE_STRING),
-                                'role': openapi.Schema(type=openapi.TYPE_STRING),
-                                'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
-                            }
-                        )
+                    'data': {
+                        'username': updated_user.username,
+                        'email': updated_user.email,
+                        'role': updated_user.role
                     }
-                )
-            ),
-            400: 'Validation Error',
-            403: 'Unauthorized'
-        }
-    )
-    @debug_error
-    def get(self, request):
-        # Support pagination and filtering
-        page = int(request.query_params.get('page', 1))
-        per_page = int(request.query_params.get('per_page', 25))
-        role = request.query_params.get('role')
-        is_active = request.query_params.get('is_active')
+                })
 
-        # Base queryset
-        users = User.objects.all()
-
-        # Apply filters
-        if role:
-            users = users.filter(role=role)
-        if is_active is not None:
-            users = users.filter(is_active=is_active.lower() == 'true')
-
-        # Pagination
-        start = (page - 1) * per_page
-        end = start + per_page
-        paginated_users = users[start:end]
-
-        serializer = UserSerializer(paginated_users, many=True)
-        return Response({
-            'users': serializer.data,
-            'total_users': users.count(),
-            'page': page,
-            'per_page': per_page,
-            'total_pages': (users.count() + per_page - 1) // per_page
-        })
-
-class UserDetailView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    @debug_error
-    def get(self, request):
-        user_id = request.query_params.get('id')
-        username = request.query_params.get('username')
-        email = request.query_params.get('email')
-
-        try:
-            # Find user based on provided parameters
-            if user_id:
-                user = get_object_or_404(User, id=user_id)
-            elif username:
-                user = get_object_or_404(User, username=username)
-            elif email:
-                user = get_object_or_404(User, email=email)
-            else:
-                return Response({
-                    'error': 'Identification parameter (id/username/email) is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Ensure user can only access their own profile or admin can access all
-            if request.user.id != user.id and request.user.role not in ['ADMIN', 'SUPERUSER']:
-                return Response({
-                    'error': 'Not authorized to view this user profile'
-                }, status=status.HTTP_403_FORBIDDEN)
-
-            serializer = UserSerializer(user)
             return Response({
-                'user': serializer.data,
-                'lookup_method': 'id' if user_id else 'username' if username else 'email'
-            })
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Validation error',
+                'data': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
             return Response({
-                'error': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Update failed',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class CustomTokenObtainPairView(TokenObtainPairView):
-    serializer_class = CustomTokenObtainPairSerializer
-    permission_classes = [AllowAny]
-
     @swagger_auto_schema(
         operation_description="Obtain JWT Tokens",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['login_input', 'password'],
+            required=['username', 'password'],
             properties={
-                'login_input': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="Username or Email"
-                ),
-                'password': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="User password"
-                )
+                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                'password': openapi.Schema(type=openapi.TYPE_STRING)
             }
         ),
         responses={
-            200: 'Successful Token Generation',
-            400: 'Invalid Credentials'
+            200: openapi.Response(
+                description='Token Generated Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'refresh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'access': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
+                    }
+                )
+            )
         }
     )
-    @debug_error
     def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
+        try:
+            response = super().post(request, *args, **kwargs)
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Token generated successfully',
+                'data': response.data
+            })
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Token generation failed',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
 
 class MobileLoginView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_description="Mobile Device Login",
-        tags=['mobile'],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=['device_id'],
             properties={
-                'device_id': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description='Unique identifier for the mobile device'
-                ),
-                'device_name': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description='Optional name of the device',
-                    nullable=True
-                ),
-                'device_type': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description='Optional type of device (iOS/Android)',
-                    nullable=True
-                ),
-                'app_version': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description='Optional app version',
-                    nullable=True
-                )
+                'device_id': openapi.Schema(type=openapi.TYPE_STRING),
+                'device_name': openapi.Schema(type=openapi.TYPE_STRING),
+                'device_type': openapi.Schema(type=openapi.TYPE_STRING)
             }
         ),
         responses={
             200: openapi.Response(
-                description='Successful Login',
+                description='Mobile Login Successful',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'refresh': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='JWT Refresh Token'
-                        ),
-                        'access': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='JWT Access Token'
-                        ),
-                        'device_id': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Device Identifier'
-                        )
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
                     }
                 )
-            ),
-            400: 'Bad Request - Missing Device ID'
+            )
         }
     )
-    @debug_error
     def post(self, request):
-        device_id = request.data.get('device_id')
-
-        if not device_id:
-            return Response({
-                'error': 'Device ID is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Use default mobile user (ensure this user exists)
         try:
-            user = User.objects.get(username='default_mobile')
-        except User.DoesNotExist:
-            # Create default mobile user if not exists
-            user = User.objects.create_user(
-                username=settings.MOBILE_DEFAULT_USERNAME,
-                email=f'{settings.MOBILE_DEFAULT_USERNAME}@fmis.gov.kh',
-                password=settings.MOBILE_DEFAULT_PASSWORD
+            device_id = request.data.get('device_id')
+            device_name = request.data.get('device_name')
+            device_type = request.data.get('device_type')
+
+            if not device_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Device ID is required',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Create or update mobile device record
+            device, created = MobileDevice.objects.get_or_create(
+                device_id=device_id,
+                defaults={
+                    'device_name': device_name,
+                    'device_type': device_type
+                }
             )
 
-        # Find or create mobile device
-        mobile_device, created = MobileDevice.objects.get_or_create(
-            device_id=device_id,
-            defaults={
-                'user': user,
-                'is_active': True
-            }
-        )
+            # Generate tokens
+            refresh = RefreshToken.for_user(device.user)
 
-        # Generate device-specific tokens
-        tokens = mobile_device.generate_device_tokens(user)
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Mobile login successful',
+                'data': {
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                    'device_id': device.device_id
+                }
+            })
 
-        return Response({
-            'refresh': tokens['refresh_token'],
-            'access': tokens['access_token'],
-            'device_id': device_id
-        })
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Mobile login failed',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class CustomTokenRefreshView(TokenRefreshView):
-    permission_classes = [AllowAny]
-
     @swagger_auto_schema(
-        operation_description="Refresh Mobile Device Token",
-        tags=['mobile'],
-        manual_parameters=[
-            openapi.Parameter(
-                name='X-Device-ID',
-                in_=openapi.IN_HEADER,
-                type=openapi.TYPE_STRING,
-                description='Unique identifier for the mobile device',
-                required=True
-            )
-        ],
+        operation_description="Refresh JWT Token",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=['refresh'],
             properties={
-                'refresh': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description='Current refresh token'
-                )
+                'refresh': openapi.Schema(type=openapi.TYPE_STRING)
             }
         ),
         responses={
@@ -656,46 +707,30 @@ class CustomTokenRefreshView(TokenRefreshView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'access': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='New JWT Access Token'
-                        ),
-                        'refresh': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='New JWT Refresh Token'
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'access': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
                         )
                     }
                 )
-            ),
-            400: 'Bad Request - Invalid Device or Token'
+            )
         }
     )
-    @debug_error
     def post(self, request, *args, **kwargs):
-        # Get device ID from request
-        device_id = request.headers.get('X-Device-ID')
-
-        if not device_id:
-            return Response({
-                'error': 'Device ID is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            # Find the specific device
-            mobile_device = MobileDevice.objects.get(
-                device_id=device_id,
-                refresh_token=request.data.get('refresh')
-            )
-
-            # Refresh tokens for this specific device
-            new_tokens = mobile_device.refresh_device_tokens(mobile_device.user)
-
+            response = super().post(request, *args, **kwargs)
             return Response({
-                'access': new_tokens['access_token'],
-                'refresh': new_tokens['refresh_token']
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Token refreshed successfully',
+                'data': response.data
             })
-
-        except MobileDevice.DoesNotExist:
+        except Exception as e:
             return Response({
-                'error': 'Invalid device or refresh token'
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Token refresh failed',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)

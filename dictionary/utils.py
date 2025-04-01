@@ -137,9 +137,9 @@ class DictionaryTemplateGenerator:
         worksheet.protect(
             options={
                 'sheet': True,
-                'format_cells': False,
-                'format_columns': False,
-                'format_rows': False,
+                'format_cells': True,
+                'format_columns': True,
+                'format_rows': True,
                 'insert_columns': False,
                 'insert_rows': False,
                 'insert_hyperlinks': False,
@@ -212,7 +212,7 @@ class DictionaryTemplateGenerator:
         # Create formats
         bold_format = workbook.add_format({
             'bold': True,
-            'font_size': 12,
+            'font_size': 11,
             'text_wrap': True
         })
         normal_format = workbook.add_format({
