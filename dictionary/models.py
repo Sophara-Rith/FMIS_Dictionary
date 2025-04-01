@@ -27,6 +27,30 @@ class WordType:
         ('ឧទានសព្ទ', 'Interjection')
     ]
 
+    WORD_TYPE_MAP = {
+        'នាម': 'NOUN',
+        'កិរិយាសព្ទ': 'VERB',
+        'គុណនាម': 'ADJECTIVE',
+        'គុណកិរិយា': 'ADVERB',
+        'សព្វនាម': 'PRONOUN',
+        'ធ្នាក់': 'PREPOSITION',
+        'ឈ្នាប់': 'CONJUNCTION',
+        'ឧទានសព្ទ': 'INTERJECTION'
+    }
+
+    @classmethod
+    def get_en_type(cls, kh_type):
+        """
+        Safely get English type from Khmer type
+
+        Args:
+            kh_type (str): Khmer word type
+
+        Returns:
+            str: Corresponding English word type or None
+        """
+        return cls.WORD_TYPE_MAP.get(kh_type)
+
 class Staging(models.Model):
     REVIEW_STATUS_CHOICES = [
         ('PENDING', 'Pending Review'),

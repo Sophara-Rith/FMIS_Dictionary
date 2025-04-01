@@ -5,3 +5,143 @@
 [2025-03-31 15:38:40,708] ERROR basehttp 16452 11212 - "POST /api/dictionary/bookmarks/ HTTP/1.1" 500 334
 [2025-03-31 15:42:56,060] ERROR log 15132 18060 - Internal Server Error: /api/dictionary/bookmarks/
 [2025-03-31 15:42:56,061] ERROR basehttp 15132 18060 - "POST /api/dictionary/bookmarks/ HTTP/1.1" 500 122
+[2025-04-01 09:08:17,170] ERROR exception 10620 20356 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:08:17,563] ERROR exception 10620 16404 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:08:23,484] ERROR exception 10620 3816 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:08:23,631] ERROR exception 10620 13776 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:08:38,803] ERROR exception 10620 18192 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:08:38,968] ERROR exception 10620 712 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:08:40,010] ERROR exception 10620 19876 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:08:40,151] ERROR exception 10620 13708 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:24:42,059] ERROR exception 16412 14048 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:24:42,593] ERROR exception 16412 3272 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-01 09:30:06,084] ERROR log 8068 5684 - Internal Server Error: /api/users/mobile/login
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via POST, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining POST data. Change your form to point to 172.23.23.48:9991/api/users/mobile/login/ (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-01 09:30:06,088] ERROR basehttp 8068 5684 - "POST /api/users/mobile/login HTTP/1.1" 500 83158
+[2025-04-01 09:30:32,856] ERROR log 8068 1136 - Internal Server Error: /api/users/mobile/login
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via POST, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining POST data. Change your form to point to 172.23.23.48:9991/api/users/mobile/login/ (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-01 09:30:32,860] ERROR basehttp 8068 1136 - "POST /api/users/mobile/login HTTP/1.1" 500 83158

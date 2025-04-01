@@ -13,7 +13,10 @@ from .views import (
     BookmarkView,
     DictionarySyncAllView,
     DictionarySyncView,
-    DictionarySearchView
+    DictionarySearchView,
+    StagingBulkImportView,
+    ImportStatusView,
+    DictionaryTemplateDownloadView
 )
 
 urlpatterns = [
@@ -37,4 +40,9 @@ urlpatterns = [
     path('sync/', DictionarySyncView.as_view(), name='dictionary_sync'),
 
     path('search/', DictionarySearchView.as_view(), name='dictionary-search'),
+
+    path('staging/bulk_import/', StagingBulkImportView.as_view(), name='staging-bulk-import'),
+    path('staging/import-status/<str:task_id>/', ImportStatusView.as_view(), name='import-status'),
+
+    path('template/', DictionaryTemplateDownloadView.as_view(), name='dictionary-template-download')
 ]

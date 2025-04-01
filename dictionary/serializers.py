@@ -86,18 +86,13 @@ class StagingEntryCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Staging
         fields = [
-            'word_kh',
-            'word_kh_type',
-            'word_kh_definition',
-            'word_en',
-            'word_en_type',
-            'word_en_definition',
-            'pronunciation_kh',
-            'pronunciation_en',
-            'example_sentence_kh',
-            'example_sentence_en'
+            'id', 'word_kh', 'word_kh_type', 'word_kh_definition',
+            'word_en', 'word_en_type', 'word_en_definition',
+            'pronunciation_kh', 'pronunciation_en',
+            'example_sentence_kh', 'example_sentence_en'
         ]
         extra_kwargs = {
+            'id': {'read_only': True},  # Make id read-only
             'pronunciation_kh': {'required': False},
             'pronunciation_en': {'required': False},
             'example_sentence_kh': {'required': False},
@@ -105,7 +100,21 @@ class StagingEntryCreateSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, data):
-        # Validate required fields
+        """
+        Automatically map Khmer word type to English word type
+        """
+        # Check if Khmer word type is provided
+        kh_type = data.get('word_kh_type')
+
+        if kh_type:
+            # Automatically map Khmer type to English type
+            en_type = WordType.WORD_TYPE_MAP.get(kh_type)
+
+            if en_type:
+                # Set the English word type automatically
+                data['word_en_type'] = en_type
+
+        # Existing validation logic
         required_fields = [
             'word_kh',
             'word_kh_type',
@@ -114,26 +123,12 @@ class StagingEntryCreateSerializer(serializers.ModelSerializer):
             'word_en_type',
             'word_en_definition'
         ]
+
         for field in required_fields:
             if not data.get(field):
                 raise serializers.ValidationError({
                     field: f"{field.replace('_', ' ').title()} is required"
                 })
-
-        # Validate word type consistency
-        en_type = data.get('word_en_type')
-        kh_type = data.get('word_kh_type')
-
-        # Create mapping between EN and KH word types
-        type_map = dict(zip(
-            [t[0] for t in WordType.WORD_TYPE_CHOICES_EN],
-            [t[0] for t in WordType.WORD_TYPE_CHOICES_KH]
-        ))
-
-        if en_type and kh_type and type_map.get(en_type) != kh_type:
-            raise serializers.ValidationError({
-                "word_type": "English and Khmer word types must match"
-            })
 
         return data
 

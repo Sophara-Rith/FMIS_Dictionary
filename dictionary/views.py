@@ -6,15 +6,19 @@ import operator
 import traceback
 import uuid
 import hashlib
+import pandas as pd
+import os
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle, AnonRateThrottle
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from django.utils import timezone
+from django.http import FileResponse
 from django.core.cache import cache
 from django.conf import settings
 from django.db.models import Q
@@ -27,6 +31,8 @@ from .serializers import (
     DictionaryEntrySyncSerializer
 )
 from debug_utils import debug_error
+from .tasks import process_staging_bulk_import
+from .utils import DictionaryTemplateGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -1439,3 +1445,221 @@ class DictionarySearchView(APIView):
         cache.set(cache_key, response_data, timeout=3600)
 
         return Response(response_data)
+
+class StagingBulkImportView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Bulk import dictionary entries via Excel",
+        consumes=['multipart/form-data'],
+        manual_parameters=[
+            openapi.Parameter(
+                name='file',
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="Excel file (.xlsx) with dictionary entries"
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Successful import of dictionary entries',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'successful_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'failed_entries': openapi.Schema(type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(
+                                type=openapi.TYPE_OBJECT,
+                                properties={
+                                    'row': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                    'errors': openapi.Schema(type=openapi.TYPE_OBJECT)
+                                }
+                            )
+                        )
+                    }
+                )
+            ),
+            400: 'Invalid File or Data'
+        }
+    )
+    def post(self, request):
+        # Validate file upload
+        if 'file' not in request.FILES:
+            return Response(
+                {'error': 'No file uploaded'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        excel_file = request.FILES['file']
+
+        # Validate file type
+        if not excel_file.name.endswith(('.xlsx', '.xls')):
+            return Response(
+                {'error': 'Invalid file type. Please upload an Excel file.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Read Excel file
+            df = pd.read_excel(excel_file)
+
+            # Validate column names exactly match the template
+            expected_columns = [
+                'id', 'word_kh', 'word_kh_type', 'word_kh_definition',
+                'word_en', 'word_en_type', 'word_en_definition',
+                'pronunciation_kh', 'pronunciation_en',
+                'example_sentence_kh', 'example_sentence_en'
+            ]
+
+            # Strict column name validation
+            if list(df.columns) != expected_columns:
+                return Response({
+                    'error': 'Column names do not match the template. Do not modify headers!',
+                    'expected_columns': expected_columns,
+                    'actual_columns': list(df.columns)
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Prepare results tracking
+            successful_entries = []
+            failed_entries = []
+
+            # Process each row
+            for index, row in df.iterrows():
+                try:
+                    # Prepare data for serializer
+                    staging_data = {
+                        'word_kh': row['word_kh'],
+                        'word_kh_type': row['word_kh_type'],
+                        'word_kh_definition': row['word_kh_definition'],
+                        'word_en': row['word_en'],
+                        'word_en_type': row['word_en_type'],
+                        'word_en_definition': row['word_en_definition'],
+                        'pronunciation_kh': row.get('pronunciation_kh', ''),
+                        'pronunciation_en': row.get('pronunciation_en', ''),
+                        'example_sentence_kh': row.get('example_sentence_kh', ''),
+                        'example_sentence_en': row.get('example_sentence_en', '')
+                    }
+
+                    # Use existing create serializer for validation
+                    serializer = StagingEntryCreateSerializer(
+                        data=staging_data,
+                        context={'request': request}
+                    )
+
+                    if serializer.is_valid():
+                        serializer.save()
+                        successful_entries.append(serializer.data)
+                    else:
+                        failed_entries.append({
+                            'row': index + 2,  # Excel rows start at 1, add header
+                            'errors': serializer.errors
+                        })
+
+                except Exception as e:
+                    failed_entries.append({
+                        'row': index + 2,
+                        'errors': str(e)
+                    })
+
+            return Response({
+                'total_entries': len(df),
+                'successful_entries': len(successful_entries),
+                'failed_entries': failed_entries
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class ImportStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, task_id):
+        try:
+            # Retrieve import status from cache
+            import_results = cache.get(f'import_task_{task_id}')
+
+            if not import_results:
+                return Response(
+                    {'error': 'Task not found or expired'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            return Response(import_results)
+
+        except Exception as e:
+            logger.error(f"Import Status Error: {str(e)}")
+            return Response(
+                {
+                    'error': 'An error occurred while fetching import status',
+                    'details': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class DictionaryTemplateDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Generate and provide downloadable Excel template
+        """
+        try:
+            # Ensure MEDIA_ROOT is configured
+            if not hasattr(settings, 'MEDIA_ROOT'):
+                raise ValueError("MEDIA_ROOT is not configured in settings")
+
+            # Create media directory if it doesn't exist
+            media_dir = settings.MEDIA_ROOT
+            os.makedirs(media_dir, exist_ok=True)
+
+            # Create import templates subdirectory
+            templates_dir = os.path.join(media_dir, 'import_templates')
+            os.makedirs(templates_dir, exist_ok=True)
+
+            # Generate template with explicit directory
+            template_path = DictionaryTemplateGenerator.generate_template(
+                output_dir=templates_dir
+            )
+
+            # Validate template file exists
+            if not os.path.exists(template_path):
+                raise FileNotFoundError(f"Template file not generated: {template_path}")
+
+            # Open file for reading
+            try:
+                template_file = open(template_path, 'rb')
+            except IOError as io_err:
+                logger.error(f"Failed to open template file: {io_err}")
+                return Response(
+                    {
+                        'error': 'Failed to access template file',
+                        'details': str(io_err)
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+            # Return file response
+            response = FileResponse(
+                template_file,
+                as_attachment=True,
+                filename='dictionary_import_template.xlsx'
+            )
+            return response
+
+        except Exception as e:
+            # Log the full error details
+            logger.error(f"Template Generation Error: {str(e)}", exc_info=True)
+
+            return Response(
+                {
+                    'error': 'Failed to generate template',
+                    'details': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
