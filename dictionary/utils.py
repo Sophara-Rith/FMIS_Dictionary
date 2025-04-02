@@ -2,7 +2,6 @@
 import os
 import uuid
 import pandas as pd
-import xlsxwriter
 from django.conf import settings
 from .models import WordType
 
@@ -58,12 +57,8 @@ class DictionaryTemplateGenerator:
     @classmethod
     def _prepare_template_data(cls):
         """
-        Prepare initial template data with example and type choices
-
-        Returns:
-            pandas.DataFrame: Template DataFrame
+        Prepare initial template data with Khmer headers
         """
-        # Prepare column data with type choices and examples
         data = {
             'ល.រ': [1],
             'ពាក្យខ្មែរ': ['Example Khmer Word'],
@@ -239,3 +234,9 @@ class DictionaryTemplateGenerator:
 
         # Adjust column width
         worksheet.set_column(0, 0, 50)
+
+def generate_unique_task_id():
+    """
+    Generate a unique task identifier
+    """
+    return str(uuid.uuid4())

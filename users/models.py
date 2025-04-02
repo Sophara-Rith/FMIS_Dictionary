@@ -102,6 +102,9 @@ class MobileDevice(models.Model):
     )
     device_id = models.CharField(max_length=255, unique=True)
 
+    device_name = models.TextField(null=True, blank=True)
+    device_type = models.TextField(null=True, blank=True)
+
     # Store individual tokens for each device
     access_token = models.TextField(null=True, blank=True)
     refresh_token = models.TextField(null=True, blank=True)

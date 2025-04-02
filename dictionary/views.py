@@ -22,6 +22,7 @@ from django.http import FileResponse
 from django.core.cache import cache
 from django.conf import settings
 from django.db.models import Q
+from django.core.paginator import Paginator, EmptyPage, InvalidPage
 from .models import Dictionary, Staging, Bookmark, WordType
 from .serializers import (
     DictionaryEntrySerializer,
@@ -560,603 +561,6 @@ class BookmarkRateThrottle(UserRateThrottle):
         device_id = request.headers.get('X-Device-ID')
         return f'throttle_device_{device_id}'
 
-class BookmarkView(APIView):
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-    throttle_classes = [BookmarkRateThrottle]
-
-    def validate_device_id(self, request):
-        """
-        Validate device ID from request
-        """
-        device_id = request.headers.get('X-Device-ID')
-        if not device_id:
-            raise ValueError("Device ID is required in X-Device-ID header")
-        return device_id
-
-    @swagger_auto_schema(
-        operation_description="Add a bookmark for a word",
-        tags=['mobile'],
-        manual_parameters=[
-            openapi.Parameter(
-                'X-Device-ID',
-                openapi.IN_HEADER,
-                description="Unique Device Identifier",
-                type=openapi.TYPE_STRING,
-                required=True
-            )
-        ],
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['word_id'],
-            properties={
-                'word_id': openapi.Schema(
-                    type=openapi.TYPE_INTEGER,
-                    description="ID of the dictionary entry to bookmark"
-                )
-            }
-        ),
-        responses={
-            201: openapi.Response(
-                description='Bookmark Added Successfully',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Success message'
-                        ),
-                        'bookmark': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'word_details': openapi.Schema(
-                                    type=openapi.TYPE_OBJECT,
-                                    properties={
-                                        'word_id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
-                                    }
-                                ),
-                                'created_at': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    format=openapi.FORMAT_DATETIME
-                                )
-                            }
-                        )
-                    }
-                )
-            ),
-            400: 'Bad Request - Invalid Input',
-            401: 'Unauthorized - Invalid Authentication',
-            404: 'Not Found - Word Does Not Exist'
-        }
-    )
-    @debug_error
-    def post(self, request):
-        try:
-            # Validate device ID
-            device_id = self.validate_device_id(request)
-
-            # Print debug information
-            print("🔖 DEBUG: Creating Bookmark")
-            print(f"🔑 Device ID: {device_id}")
-            print(f"📦 Request Data: {request.data}")
-
-            # Validate word_id is provided
-            word_id = request.data.get('word_id')
-            if not word_id:
-                return Response({
-                    'error': 'word_id is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Check if word exists
-            try:
-                word = Dictionary.objects.get(id=word_id)
-            except Dictionary.DoesNotExist:
-                return Response({
-                    'error': f'Word with id {word_id} does not exist'
-                }, status=status.HTTP_404_NOT_FOUND)
-
-            # Check if bookmark already exists
-            existing_bookmark = Bookmark.objects.filter(
-                device_id=device_id,
-                word=word
-            ).first()
-
-            if existing_bookmark:
-                return Response({
-                    'message': 'Bookmark already exists',
-                    'bookmark_id': existing_bookmark.id
-                }, status=status.HTTP_200_OK)
-
-            # Create new bookmark
-            bookmark = Bookmark.objects.create(
-                device_id=device_id,
-                word=word
-            )
-
-            # Serialize and return
-            serializer = BookmarkSerializer(bookmark)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-        except ValueError as ve:
-            return Response({
-                'error': str(ve)
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception as e:
-            # Log detailed error
-            logger.error(f"Bookmark Creation Error: {str(e)}")
-            print("❌ Bookmark Creation Error:")
-            traceback.print_exc()
-
-            return Response({
-                'error': 'Failed to create bookmark',
-                'details': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    @swagger_auto_schema(
-        operation_description="Retrieve bookmarks for a device",
-        tags=['mobile'],
-        manual_parameters=[
-            openapi.Parameter(
-                'X-Device-ID',
-                openapi.IN_HEADER,
-                description="Unique Device Identifier",
-                type=openapi.TYPE_STRING,
-                required=True
-            ),
-            openapi.Parameter(
-                'page',
-                openapi.IN_QUERY,
-                description="Page number for pagination",
-                type=openapi.TYPE_INTEGER,
-                default=1
-            ),
-            openapi.Parameter(
-                'per_page',
-                openapi.IN_QUERY,
-                description="Number of items per page",
-                type=openapi.TYPE_INTEGER,
-                default=10
-            )
-        ],
-        responses={
-            200: openapi.Response(
-                description='Successfully Retrieved Bookmarks',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'bookmarks': openapi.Schema(
-                            type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(
-                                type=openapi.TYPE_OBJECT,
-                                properties={
-                                    'word_details': openapi.Schema(
-                                        type=openapi.TYPE_OBJECT,
-                                        properties={
-                                            'word_id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
-                                        }
-                                    ),
-                                    'created_at': openapi.Schema(
-                                        type=openapi.TYPE_STRING,
-                                        format=openapi.FORMAT_DATETIME
-                                    )
-                                }
-                            )
-                        ),
-                        'total_bookmarks': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'page': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
-                    }
-                )
-            ),
-            400: 'Bad Request - Invalid Input',
-            401: 'Unauthorized - Invalid Authentication'
-        }
-    )
-    @debug_error
-    def get(self, request):
-        """
-        Retrieve bookmarks for a device
-        """
-        try:
-            # Validate device ID
-            device_id = self.validate_device_id(request)
-
-            # Get bookmarks
-            bookmarks = Bookmark.objects.filter(device_id=device_id)
-
-            # Paginate
-            page = int(request.query_params.get('page', 1))
-            per_page = int(request.query_params.get('per_page', 10))
-
-            start = (page - 1) * per_page
-            end = start + per_page
-
-            paginated_bookmarks = bookmarks[start:end]
-
-            # Serialize bookmarks
-            serializer = BookmarkSerializer(paginated_bookmarks, many=True)
-
-            return Response({
-                'bookmarks': serializer.data,
-                'total_bookmarks': bookmarks.count(),
-                'page': page,
-                'per_page': per_page,
-                'total_pages': (bookmarks.count() + per_page - 1) // per_page
-            })
-
-        except ValueError as e:
-            return Response({
-                'error': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({
-                'error': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    @swagger_auto_schema(
-        operation_description="Remove a bookmark for a word",
-        tags=['mobile'],
-        manual_parameters=[
-            openapi.Parameter(
-                'X-Device-ID',
-                openapi.IN_HEADER,
-                description="Unique Device Identifier",
-                type=openapi.TYPE_STRING,
-                required=True
-            )
-        ],
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['word_id'],
-            properties={
-                'word_id': openapi.Schema(
-                    type=openapi.TYPE_INTEGER,
-                    description="ID of the dictionary entry to remove from bookmarks"
-                )
-            }
-        ),
-        responses={
-            200: openapi.Response(
-                description='Bookmark Removed Successfully',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Success message'
-                        )
-                    }
-                )
-            ),
-            400: 'Bad Request - Invalid Input',
-            401: 'Unauthorized - Invalid Authentication',
-            404: 'Not Found - Bookmark Does Not Exist'
-        }
-    )
-    @debug_error
-    def delete(self, request):
-        """
-        Delete a bookmark
-        """
-        try:
-            # Validate device ID
-            device_id = self.validate_device_id(request)
-
-            # Print debug information
-            print("🔖 DEBUG: Deleting Bookmark")
-            print(f"🔑 Device ID: {device_id}")
-            print(f"📦 Request Data: {request.data}")
-
-            # Validate word_id is provided
-            word_id = request.data.get('word_id')
-            if not word_id:
-                return Response({
-                    'error': 'word_id is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Find and delete the bookmark
-            bookmark = Bookmark.objects.filter(
-                device_id=device_id,
-                word_id=word_id
-            ).first()
-
-            if not bookmark:
-                return Response({
-                    'error': 'Bookmark not found'
-                }, status=status.HTTP_404_NOT_FOUND)
-
-            bookmark.delete()
-            return Response({
-                'message': 'Bookmark deleted successfully'
-            }, status=status.HTTP_200_OK)
-
-        except ValueError as ve:
-            return Response({
-                'error': str(ve)
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception as e:
-            # Log detailed error
-            logger.error(f"Bookmark Deletion Error: {str(e)}")
-            print("❌ Bookmark Deletion Error:")
-            traceback.print_exc()
-
-            return Response({
-                'error': 'Failed to delete bookmark',
-                'details': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class DictionarySyncAllView(APIView):
-    """
-    Comprehensive Endpoint for Full Dictionary Synchronization
-    """
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_id='dictionary_sync_all',
-        tags={'mobile'},
-        operation_description="""
-        Full Dictionary Synchronization Endpoint
-
-        ### Example Requests:
-        1. Default Sync:
-        ```
-        GET /dictionary/sync_all/
-        ```
-
-        2. Custom Pagination:
-        ```
-        GET /dictionary/sync_all/?page=2&per_page=500
-        ```
-        """,
-        manual_parameters=[
-            openapi.Parameter(
-                'page',
-                openapi.IN_QUERY,
-                description="Page number for pagination (default: 1)",
-                type=openapi.TYPE_INTEGER,
-                default=1
-            ),
-            openapi.Parameter(
-                'per_page',
-                openapi.IN_QUERY,
-                description="Number of entries per page (default: 1000, max: 2000)",
-                type=openapi.TYPE_INTEGER,
-                default=1000
-            )
-        ],
-        responses={
-            200: openapi.Response(
-                description='Successful Dictionary Synchronization',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'entries': openapi.Schema(
-                            type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(
-                                type=openapi.TYPE_OBJECT,
-                                properties={
-                                    'index': openapi.Schema(type=openapi.TYPE_INTEGER, description='Unique entry index'),
-                                    'word_kh': openapi.Schema(type=openapi.TYPE_STRING, description='Khmer word'),
-                                    'word_en': openapi.Schema(type=openapi.TYPE_STRING, description='English word'),
-                                }
-                            )
-                        ),
-                        'sync_metadata': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'sync_id': openapi.Schema(type=openapi.TYPE_STRING),
-                                'sync_timestamp': openapi.Schema(type=openapi.TYPE_STRING)
-                            }
-                        )
-                    }
-                )
-            ),
-            400: 'Bad Request - Invalid Parameters',
-            429: 'Too Many Requests'
-        }
-    )
-    @debug_error
-    def get(self, request):
-        # Generate unique sync request ID for tracking
-        sync_id = str(uuid.uuid4())
-        sync_timestamp = timezone.now().isoformat()
-
-        try:
-            # Validate and sanitize input parameters
-            page = max(1, int(request.query_params.get('page', 1)))
-            per_page = min(max(1, int(request.query_params.get('per_page', 1000))), 2000)
-
-            # Create cache key for this specific sync request
-            cache_key = f"sync_all_page_{page}_per_page_{per_page}"
-
-            # Try to retrieve cached response
-            cached_response = cache.get(cache_key)
-            if cached_response and settings.DEBUG is False:
-                logger.info(f"Serving cached sync all response - Sync ID: {sync_id}")
-                return Response(cached_response)
-
-            # Calculate pagination
-            total_entries = Dictionary.objects.count()
-            total_pages = (total_entries + per_page - 1) // per_page
-
-            # Validate page number
-            if page > total_pages:
-                return Response({
-                    'error': 'Page number exceeds total available pages',
-                    'total_pages': total_pages
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Calculate start and end indices
-            start = (page - 1) * per_page
-            end = start + per_page
-
-            # Fetch entries with optimized queryset
-            entries = Dictionary.objects.order_by('index')[start:end]
-
-            # Serialize entries
-            serializer = DictionaryEntrySyncSerializer(entries, many=True)
-
-            # Prepare response
-            response_data = {
-                'entries': serializer.data,
-                'sync_metadata': {
-                    'total_entries': total_entries,
-                    'page': page,
-                    'per_page': per_page,
-                    'total_pages': total_pages,
-                    'sync_id': sync_id,
-                    'sync_timestamp': sync_timestamp
-                }
-            }
-
-            # Cache response (if not in debug mode)
-            if settings.DEBUG is False:
-                cache.set(
-                    cache_key,
-                    response_data,
-                    timeout=3600  # Cache for 1 hour
-                )
-
-            # Log successful sync
-            logger.info(f"Sync All Successful - Sync ID: {sync_id}, Page: {page}, Entries: {len(entries)}")
-
-            return Response(response_data)
-
-        except ValueError as ve:
-            # Handle invalid parameter types
-            logger.error(f"Sync All Error - Invalid Parameters: {str(ve)}")
-            return Response({
-                'error': 'Invalid parameters',
-                'details': str(ve)
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception as e:
-            # Catch-all for unexpected errors
-            logger.error(f"Sync All Critical Error - Sync ID: {sync_id}, Error: {str(e)}")
-            return Response({
-                'error': 'Internal server error',
-                'sync_id': sync_id
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class DictionarySyncView(APIView):
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_description="""
-        Incremental Dictionary Synchronization Endpoint
-
-        This endpoint allows mobile apps to:
-        - Fetch new entries
-        - Get updates to existing entries
-        - Synchronize dictionary content
-
-        Key Features:
-        - Supports incremental sync
-        - Returns only active and updated entries
-        - Provides comprehensive metadata
-        """,
-        tags={'mobile'},
-        manual_parameters=[
-            openapi.Parameter(
-                'last_sync_timestamp',
-                openapi.IN_QUERY,
-                description="Last Synchronization Timestamp (ISO format)",
-                type=openapi.TYPE_STRING,
-                required=True
-            ),
-            openapi.Parameter(
-                'page',
-                openapi.IN_QUERY,
-                description="Page number for pagination",
-                type=openapi.TYPE_INTEGER,
-                default=1
-            ),
-            openapi.Parameter(
-                'per_page',
-                openapi.IN_QUERY,
-                description="Number of entries per page",
-                type=openapi.TYPE_INTEGER,
-                default=500
-            )
-        ]
-    )
-    @debug_error
-    def get(self, request):
-        # Extract sync parameters
-        last_sync_timestamp = request.query_params.get('last_sync_timestamp')
-        page = int(request.query_params.get('page', 1))
-        per_page = int(request.query_params.get('per_page', 500))
-
-        # Validate last sync timestamp
-        try:
-            last_sync = timezone.datetime.fromisoformat(last_sync_timestamp)
-        except (ValueError, TypeError):
-            return Response({
-                'error': 'Invalid timestamp format. Use ISO format.',
-                'example': '2024-03-22T10:30:45.123456Z'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Query for updated and new entries
-        updated_entries = Dictionary.objects.filter(
-            Q(created_at__gt=last_sync) |  # New entries
-            Q(updated_at__gt=last_sync),   # Updated existing entries
-            is_active=True  # Only active entries
-        ).order_by('updated_at')
-
-        # Pagination
-        total_entries = updated_entries.count()
-        total_pages = (total_entries + per_page - 1) // per_page
-
-        # Calculate start and end indices
-        start = (page - 1) * per_page
-        end = start + per_page
-        paginated_entries = updated_entries[start:end]
-
-        # Serialize entries
-        serializer = DictionaryEntrySyncSerializer(paginated_entries, many=True)
-
-        # Prepare response
-        response_data = {
-            'entries': serializer.data,
-            'sync_metadata': {
-                'total_entries': total_entries,
-                'page': page,
-                'per_page': per_page,
-                'total_pages': total_pages,
-                'last_sync_timestamp': last_sync_timestamp,
-                'current_sync_timestamp': timezone.now().isoformat()
-            }
-        }
-
-        return Response(response_data)
-
 def track_search_performance(func):
     @wraps(func)
     def wrapper(self, request, *args, **kwargs):
@@ -1450,6 +854,29 @@ class StagingBulkImportView(APIView):
     parser_classes = (MultiPartParser, FormParser)
     permission_classes = [IsAuthenticated]
 
+    # Column name mapping for Khmer headers
+    COLUMN_NAME_MAPPING = {
+        'ល.រ': 'id',
+        'ពាក្យខ្មែរ': 'word_kh',
+        'ថ្នាក់ពាក្យខ្មែរ': 'word_kh_type',
+        'និយមន័យ': 'word_kh_definition',
+        'ពាក្យអង់គ្លេស': 'word_en',
+        'ថ្នាក់ពាក្យអង់គ្លេស': 'word_en_type',
+        'និយមន័យអង់គ្លេស': 'word_en_definition',
+        'ការបញ្ចេញសំឡេងខ្មែរ': 'pronunciation_kh',
+        'ការបញ្ចេញសំឡេងអង់គ្លេស': 'pronunciation_en',
+        'ឧទាហរណ៍ខ្មែរ': 'example_sentence_kh',
+        'ឧទាហរណ៍អង់គ្លេស': 'example_sentence_en'
+    }
+
+    # Expected columns in the correct order
+    EXPECTED_COLUMNS = [
+        'id', 'word_kh', 'word_kh_type', 'word_kh_definition',
+        'word_en', 'word_en_type', 'word_en_definition',
+        'pronunciation_kh', 'pronunciation_en',
+        'example_sentence_kh', 'example_sentence_en'
+    ]
+
     @swagger_auto_schema(
         operation_description="Bulk import dictionary entries via Excel",
         consumes=['multipart/form-data'],
@@ -1470,7 +897,8 @@ class StagingBulkImportView(APIView):
                     properties={
                         'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
                         'successful_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'failed_entries': openapi.Schema(type=openapi.TYPE_ARRAY,
+                        'failed_entries': openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
                             items=openapi.Schema(
                                 type=openapi.TYPE_OBJECT,
                                 properties={
@@ -1485,6 +913,7 @@ class StagingBulkImportView(APIView):
             400: 'Invalid File or Data'
         }
     )
+    @debug_error
     def post(self, request):
         # Validate file upload
         if 'file' not in request.FILES:
@@ -1506,19 +935,24 @@ class StagingBulkImportView(APIView):
             # Read Excel file
             df = pd.read_excel(excel_file)
 
-            # Validate column names exactly match the template
-            expected_columns = [
-                'id', 'word_kh', 'word_kh_type', 'word_kh_definition',
-                'word_en', 'word_en_type', 'word_en_definition',
-                'pronunciation_kh', 'pronunciation_en',
-                'example_sentence_kh', 'example_sentence_en'
-            ]
+            # Attempt to rename columns using the mapping
+            try:
+                # If Khmer headers are used
+                if any(col in self.COLUMN_NAME_MAPPING for col in df.columns):
+                    df.rename(columns=self.COLUMN_NAME_MAPPING, inplace=True)
 
-            # Strict column name validation
-            if list(df.columns) != expected_columns:
+                # Validate column names
+                if list(df.columns) != self.EXPECTED_COLUMNS:
+                    return Response({
+                        'error': 'Column names do not match the template. Do not modify headers!',
+                        'expected_columns': self.EXPECTED_COLUMNS,
+                        'actual_columns': list(df.columns)
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            except Exception as column_error:
                 return Response({
-                    'error': 'Column names do not match the template. Do not modify headers!',
-                    'expected_columns': expected_columns,
+                    'error': f'Column mapping error: {str(column_error)}',
+                    'expected_columns': self.EXPECTED_COLUMNS,
                     'actual_columns': list(df.columns)
                 }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1543,38 +977,77 @@ class StagingBulkImportView(APIView):
                         'example_sentence_en': row.get('example_sentence_en', '')
                     }
 
-                    # Use existing create serializer for validation
+                    # Validate and save each entry
                     serializer = StagingEntryCreateSerializer(
                         data=staging_data,
                         context={'request': request}
                     )
 
                     if serializer.is_valid():
-                        serializer.save()
-                        successful_entries.append(serializer.data)
-                    else:
-                        failed_entries.append({
+                        # Save the staging entry
+                        staging_entry = serializer.save()
+                        successful_entries.append({
                             'row': index + 2,  # Excel rows start at 1, add header
+                            'word_kh': staging_entry.word_kh,
+                            'word_en': staging_entry.word_en
+                        })
+                    else:
+                        # Collect validation errors
+                        failed_entries.append({
+                            'row': index + 2,
                             'errors': serializer.errors
                         })
 
-                except Exception as e:
+                except Exception as entry_error:
+                    # Catch any unexpected errors during entry processing
                     failed_entries.append({
                         'row': index + 2,
-                        'errors': str(e)
+                        'errors': str(entry_error)
                     })
 
+            # Prepare and return response
             return Response({
                 'total_entries': len(df),
                 'successful_entries': len(successful_entries),
+                'details': successful_entries,
                 'failed_entries': failed_entries
-            })
+            }, status=status.HTTP_200_OK if len(failed_entries) < len(df) else status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            # Log the full error for debugging
+            logger.error(f"Bulk import error: {str(e)}", exc_info=True)
+
+            return Response({
+                'error': 'An error occurred during file processing',
+                'details': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    def validate_import_data(self, df):
+        """
+        Additional data validation before import
+        """
+        errors = []
+
+        # Check required columns
+        required_columns = ['word_kh', 'word_en', 'word_kh_type', 'word_en_type']
+        for col in required_columns:
+            if df[col].isnull().any():
+                errors.append(f"Column {col} contains empty values")
+
+        # Validate word types
+        valid_kh_types = [type[0] for type in WordType.WORD_TYPE_CHOICES_KH]
+        valid_en_types = [type[0] for type in WordType.WORD_TYPE_CHOICES_EN]
+
+        invalid_kh_types = df[~df['word_kh_type'].isin(valid_kh_types)]
+        invalid_en_types = df[~df['word_en_type'].isin(valid_en_types)]
+
+        if not invalid_kh_types.empty:
+            errors.append("Invalid Khmer word types found")
+
+        if not invalid_en_types.empty:
+            errors.append("Invalid English word types found")
+
+        return errors
 
 class ImportStatusView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1663,3 +1136,567 @@ class DictionaryTemplateDownloadView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class BookmarkView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve User Bookmarks",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique Device Identifier',
+                required=True
+            ),
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description='Page number for pagination',
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description='Number of items per page',
+                default=25
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Bookmarks Retrieved Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'bookmarks': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'word_details': openapi.Schema(
+                                                type=openapi.TYPE_OBJECT,
+                                                properties={
+                                                    'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                                    'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                                    'definition_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                                    'definition_en': openapi.Schema(type=openapi.TYPE_STRING)
+                                                }
+                                            )
+                                        }
+                                    )
+                                ),
+                                'total_bookmarks': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
+                            }
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Missing Device ID',
+            401: 'Unauthorized',
+            500: 'Internal Server Error'
+        }
+    )
+    def get(self, request):
+        try:
+            # Get device ID from request headers or parameters
+            device_id = request.headers.get('X-Device-ID') or request.query_params.get('device_id')
+
+            if not device_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Device ID is required',
+                    'data': []
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Pagination parameters
+            page = int(request.query_params.get('page', 1))
+            per_page = int(request.query_params.get('per_page', 25))
+
+            # Calculate pagination
+            start = (page - 1) * per_page
+            end = start + per_page
+
+            # Filter bookmarks by device ID
+            bookmarks = Bookmark.objects.filter(device_id=device_id)
+
+            # Paginate bookmarks
+            paginated_bookmarks = bookmarks[start:end]
+
+            # Use existing BookmarkSerializer
+            serializer = BookmarkSerializer(paginated_bookmarks, many=True)
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Bookmarks retrieved successfully',
+                'data': {
+                    'bookmarks': serializer.data,
+                    'total_bookmarks': bookmarks.count(),
+                    'page': page,
+                    'per_page': per_page,
+                    'total_pages': (bookmarks.count() + per_page - 1) // per_page
+                }
+            })
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Failed to retrieve bookmarks',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @swagger_auto_schema(
+        operation_description="Create a Bookmark",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique Device Identifier',
+                required=True
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['word_id'],
+            properties={
+                'word_id': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description="ID of the word to bookmark"
+                )
+            }
+        ),
+        responses={
+            201: openapi.Response(
+                description='Bookmark Created Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'word_details': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'definition_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'definition_en': openapi.Schema(type=openapi.TYPE_STRING)
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Missing Device ID or Word ID',
+            404: 'Word Not Found',
+            500: 'Internal Server Error'
+        }
+    )
+    def post(self, request):
+        try:
+            # Get device ID from request headers
+            device_id = request.headers.get('X-Device-ID')
+
+            if not device_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Device ID is required',
+                    'data': []
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Get word_id from request data
+            word_id = request.data.get('word_id')
+
+            if not word_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Word ID is required',
+                    'data': []
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check if word exists
+            try:
+                word = Dictionary.objects.get(id=word_id)
+            except Dictionary.DoesNotExist:
+                return Response({
+                    'responseCode': status.HTTP_404_NOT_FOUND,
+                    'message': 'Word not found',
+                    'data': []
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Create or get bookmark
+            bookmark, created = Bookmark.objects.get_or_create(
+                device_id=device_id,
+                word=word
+            )
+
+            # Use existing BookmarkSerializer to get word details
+            serializer = BookmarkSerializer(bookmark)
+
+            return Response({
+                'responseCode': status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+                'message': 'Bookmark added successfully' if created else 'Bookmark already exists',
+                'data': serializer.data
+            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Failed to add bookmark',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @swagger_auto_schema(
+        operation_description="Delete a Bookmark",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique Device Identifier',
+                required=True
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['word_id'],
+            properties={
+                'word_id': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description="ID of the word to remove from bookmarks"
+                )
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description='Bookmark Deleted Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'word_details': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'definition_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'definition_en': openapi.Schema(type=openapi.TYPE_STRING)
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Missing Device ID or Word ID',
+            404: 'Bookmark Not Found',
+            500: 'Internal Server Error'
+        }
+    )
+    def delete(self, request):
+        try:
+            # Get device ID from request headers
+            device_id = request.headers.get('X-Device-ID')
+
+            if not device_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Device ID is required',
+                    'data': []
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Get word_id from request data
+            word_id = request.data.get('word_id')
+
+            if not word_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Word ID is required',
+                    'data': []
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Find and delete the bookmark
+            bookmark = Bookmark.objects.filter(
+                device_id=device_id,
+                word_id=word_id
+            ).first()
+
+            if not bookmark:
+                return Response({
+                    'responseCode': status.HTTP_404_NOT_FOUND,
+                    'message': 'Bookmark not found',
+                    'data': []
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Use existing BookmarkSerializer to get word details before deletion
+            serializer = BookmarkSerializer(bookmark)
+            bookmark_data = serializer.data
+
+            # Delete the bookmark
+            bookmark.delete()
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Bookmark deleted successfully',
+                'data': bookmark_data
+            })
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Failed to delete bookmark',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class DictionarySyncView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Sync dictionary entries since last synchronization",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'last_sync_timestamp',
+                openapi.IN_QUERY,
+                description="Timestamp of last synchronization to fetch updated entries",
+                type=openapi.TYPE_STRING,
+                required=True
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Dictionary Sync Successful',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'entries': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'sync_status': openapi.Schema(type=openapi.TYPE_STRING)
+                                        }
+                                    )
+                                ),
+                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'last_sync_timestamp': openapi.Schema(type=openapi.TYPE_STRING),
+                                'current_sync_timestamp': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
+                    }
+                )
+            )
+        }
+    )
+    def get(self, request):
+        try:
+            # Extract last sync timestamp (required parameter)
+            last_sync_timestamp = request.query_params.get('last_sync_timestamp')
+
+            # Validate timestamp format
+            try:
+                last_sync = timezone.datetime.fromisoformat(last_sync_timestamp)
+            except (ValueError, TypeError):
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid last_sync_timestamp format. Use ISO format.',
+                    'data': {}
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Query for new and updated entries since last sync
+            updated_entries = Dictionary.objects.filter(
+                Q(created_at__gt=last_sync) |  # New entries
+                Q(updated_at__gt=last_sync)    # Updated existing entries
+            )
+
+            # Prepare current sync timestamp
+            current_sync_timestamp = timezone.now().isoformat()
+
+            # Prepare sync data
+            sync_data = {
+                'entries': [{
+                    'id': entry.id,
+                    'word_kh': entry.word_kh,
+                    'word_en': entry.word_en,
+                    'word_kh_type': entry.word_kh_type,
+                    'word_en_type': entry.word_en_type,
+                    'word_kh_definition': entry.word_kh_definition,
+                    'word_en_definition': entry.word_en_definition,
+                    'sync_status': self._get_sync_status(entry, last_sync)
+                } for entry in updated_entries],
+                'total_entries': updated_entries.count(),
+                'last_sync_timestamp': last_sync_timestamp,
+                'current_sync_timestamp': current_sync_timestamp
+            }
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Dictionary entries retrieved successfully',
+                'data': sync_data
+            })
+
+        except Exception as e:
+            logger.error(f"Sync error: {str(e)}")
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'An error occurred during dictionary sync',
+                'data': {}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _get_sync_status(self, entry, last_sync):
+        """
+        Determine sync status of an entry
+        """
+        if entry.created_at > last_sync:
+            return 'NEW'
+        elif entry.updated_at > last_sync:
+            return 'UPDATED'
+        return 'UNCHANGED'
+
+class DictionarySyncAllView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_description="Full Dictionary Synchronization",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number for pagination",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of entries per page",
+                type=openapi.TYPE_INTEGER,
+                default=25
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Full Dictionary Sync Successful',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'entries': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING)
+                                        }
+                                    )
+                                )
+                            }
+                        )
+                    }
+                )
+            )
+        }
+    )
+    def get(self, request):
+        try:
+            # Safely get pagination parameters
+            page = max(1, int(request.GET.get('page', 1)))
+            per_page = max(1, int(request.GET.get('per_page', 25)))
+
+            # Calculate pagination
+            total_entries = Dictionary.objects.count()
+            total_pages = (total_entries + per_page - 1) // per_page
+
+            # Calculate start and end indices
+            start = (page - 1) * per_page
+            end = start + per_page
+
+            # Fetch entries with optimized queryset
+            entries = Dictionary.objects.order_by('id')[start:end]
+
+            # Prepare last and current sync timestamps
+            last_sync_timestamp = (timezone.now() - timezone.timedelta(minutes=2)).isoformat()
+            current_sync_timestamp = timezone.now().isoformat()
+
+            # Prepare response data matching the exact structure
+            response_data = {
+                'entries': [
+                    {
+                        'id': entry.id,
+                        'word_kh': entry.word_kh,
+                        'word_en': entry.word_en,
+                        'word_kh_type': entry.word_kh_type,
+                        'word_en_type': entry.word_en_type,
+                        'word_kh_definition': entry.word_kh_definition,
+                        'word_en_definition': entry.word_en_definition
+                    } for entry in entries
+                ],
+                'total_entries': total_entries,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': total_pages,
+                'last_sync_timestamp': last_sync_timestamp,
+                'current_sync_timestamp': current_sync_timestamp
+            }
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Full dictionary synced successfully',
+                'data': response_data
+            })
+
+        except Exception as e:
+            logger.error(f"Sync All Error: {str(e)}")
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Internal server error',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

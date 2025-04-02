@@ -6,16 +6,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Mobile Sync Credentials
-MOBILE_DEFAULT_USERNAME = os.getenv('MOBILE_DEFAULT_USERNAME', 'default_mobile')
-MOBILE_DEFAULT_PASSWORD = os.getenv('MOBILE_DEFAULT_PASSWORD', 'Fmi$2025')
-
 HOST = os.environ.get('HOST', '0.0.0.0')
 PORT = os.environ.get('PORT', '3030')
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'alkjHDOSIF9&932KDH293867*8#7')
+
+# Mobile Sync Credentials
+MOBILE_DEFAULT_USERNAME = os.getenv('MOBILE_DEFAULT_USERNAME', 'fmis369')
+MOBILE_DEFAULT_PASSWORD = os.getenv('MOBILE_DEFAULT_PASSWORD')
 
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
@@ -120,13 +120,16 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
     'PAGE_SIZE': 100,
     'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
+        # 'rest_framework.throttling.AnonRateThrottle',
+        # 'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': os.getenv('ANON_RATE', '100/day'),
-        'user': os.getenv('USER_RATE', '1000/day'),
-        'search': os.getenv('SEARCH', '20/minute')
+        # 'anon': os.getenv('ANON_RATE', '100/day'),
+        # 'user': os.getenv('USER_RATE', '1000/day'),
+        # 'search': os.getenv('SEARCH', '20/minute')
+        'anon': None,
+        'user': None,
+        'search': None
     }
 }
 

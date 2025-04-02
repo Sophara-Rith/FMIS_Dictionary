@@ -1,11 +1,13 @@
 # users/views.py
+import logging
 from venv import logger
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenBlacklistView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
@@ -15,6 +17,8 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
 User = get_user_model()
+
+logger = logging.getLogger(__name__)
 
 class UserLoginView(APIView):
     permission_classes = [AllowAny]
@@ -577,13 +581,21 @@ class UserUpdateView(APIView):
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     @swagger_auto_schema(
-        operation_description="Obtain JWT Tokens",
+        operation_description="Obtain JWT Tokens with Flexible Login",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['username', 'password'],
+            required=['login_input', 'password'],
             properties={
-                'username': openapi.Schema(type=openapi.TYPE_STRING),
-                'password': openapi.Schema(type=openapi.TYPE_STRING)
+                'login_input': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Username or Email for login",
+                    example="johndoe or johndoe@example.com"
+                ),
+                'password': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="User password",
+                    format='password'
+                )
             }
         ),
         responses={
@@ -592,14 +604,257 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=200
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Token generation status message',
+                            example='Token generated successfully'
+                        ),
                         'data': openapi.Schema(
                             type=openapi.TYPE_OBJECT,
                             properties={
-                                'refresh': openapi.Schema(type=openapi.TYPE_STRING),
-                                'access': openapi.Schema(type=openapi.TYPE_STRING)
+                                'refresh': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='JWT Refresh Token'
+                                ),
+                                'access': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='JWT Access Token'
+                                ),
+                                'login_method': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Method used for login (username/email)',
+                                    example='email'
+                                )
                             }
+                        )
+                    }
+                )
+            ),
+            400: openapi.Response(
+                description='Bad Request - Invalid Credentials',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=400
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Error message',
+                            example='Invalid login credentials'
+                        ),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            ),
+            401: openapi.Response(
+                description='Unauthorized - Authentication Failed',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=401
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Authentication failure message',
+                            example='Token generation failed'
+                        ),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            )
+        }
+    )
+    def post(self, request, *args, **kwargs):
+        try:
+            # Override the request data to use login_input
+            login_input = request.data.get('login_input')
+            password = request.data.get('password')
+
+            # Modify request data to match TokenObtainPairSerializer
+            request.data['username'] = login_input
+
+            # Call parent method
+            response = super().post(request, *args, **kwargs)
+
+            # Enhance response with login method
+            response_data = response.data.copy()
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Token generated successfully',
+                'data': {
+                    **response_data
+                }
+            })
+
+        except Exception as e:
+            # Log the exception for debugging
+            logger.error(f"Token generation error: {str(e)}")
+
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Token generation failed',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+class CustomTokenRefreshView(TokenRefreshView):
+    @swagger_auto_schema(
+        operation_description="Refresh JWT Token",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['refresh'],
+            properties={
+                'refresh': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Current refresh token',
+                    example='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+                )
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description='Token Refreshed Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=200
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Token refresh status message',
+                            example='Token refreshed successfully'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'refresh': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='New JWT Refresh Token'
+                                ),
+                                'access': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='New JWT Access Token'
+                                )
+                            }
+                        )
+                    }
+                )
+            ),
+            401: openapi.Response(
+                description='Token Refresh Failed',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=401
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Token refresh error message',
+                            example='Token refresh failed'
+                        ),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            )
+        }
+    )
+    def post(self, request, *args, **kwargs):
+        try:
+            # Call parent method to get new tokens
+            response = super().post(request, *args, **kwargs)
+
+            # Create a new response with the desired structure
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Token refreshed successfully',
+                'data': {
+                    'refresh': response.data.get('refresh'),
+                    'access': response.data.get('access')
+                }
+            })
+        except Exception as e:
+            # Log the exception for debugging
+            logger.error(f"Token refresh error: {str(e)}")
+
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Token refresh failed',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+class CustomTokenBlacklistView(TokenBlacklistView):
+    @swagger_auto_schema(
+        operation_description="Blacklist JWT Refresh Token",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['refresh'],
+            properties={
+                'refresh': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Refresh token to be blacklisted',
+                    example='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+                )
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description='Token Blacklisted Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=200
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Token blacklist status message',
+                            example='Token blacklisted successfully'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            nullable=True,
+                            description='Additional data (null in this case)'
+                        )
+                    }
+                )
+            ),
+            400: openapi.Response(
+                description='Token Blacklist Failed',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=400
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Token blacklist error message',
+                            example='Token blacklist failed'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            nullable=True
                         )
                     }
                 )
@@ -608,71 +863,217 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     )
     def post(self, request, *args, **kwargs):
         try:
-            response = super().post(request, *args, **kwargs)
-            return Response({
-                'responseCode': status.HTTP_200_OK,
-                'message': 'Token generated successfully',
-                'data': response.data
-            })
+            # Validate refresh token is present
+            refresh_token = request.data.get('refresh')
+            if not refresh_token:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Refresh token is required',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Attempt to blacklist the token
+            try:
+                # Call parent method to blacklist token
+                response = super().post(request, *args, **kwargs)
+
+                # Log successful blacklist (optional)
+                logger.info(f"Token successfully blacklisted: {refresh_token[:10]}...")
+
+                return Response({
+                    'responseCode': status.HTTP_200_OK,
+                    'message': 'Token blacklisted successfully',
+                    'data': None
+                })
+
+            except TokenError as token_error:
+                # Handle specific token-related errors
+                logger.error(f"Token blacklist error: {str(token_error)}")
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid or already blacklisted token',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
+            # Catch and log any unexpected errors
+            logger.error(f"Unexpected token blacklist error: {str(e)}")
             return Response({
-                'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Token generation failed',
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Token blacklist failed',
                 'data': None
-            }, status=status.HTTP_401_UNAUTHORIZED)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class MobileLoginView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_description="Mobile Device Login",
+        operation_description="Mobile User Login Endpoint",
+        tags=['mobile'],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['device_id'],
+            required=['login_input', 'password'],
             properties={
-                'device_id': openapi.Schema(type=openapi.TYPE_STRING),
-                'device_name': openapi.Schema(type=openapi.TYPE_STRING),
-                'device_type': openapi.Schema(type=openapi.TYPE_STRING)
+                'login_input': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="User's username",
+                    example="johndoe"
+                ),
+                'password': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="User's password",
+                    format='password'
+                ),
+                'device_id': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Unique device identifier for mobile device",
+                    example="abc123xyz456"
+                )
             }
         ),
         responses={
             200: openapi.Response(
-                description='Mobile Login Successful',
+                description='Successful Login',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=200
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Login success message',
+                            example='Login successful'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'access_token': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='JWT access token'
+                                ),
+                                'refresh_token': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='JWT refresh token'
+                                ),
+                                'user': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                        'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'role': openapi.Schema(type=openapi.TYPE_STRING)
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+            ),
+            400: openapi.Response(
+                description='Bad Request - Invalid Credentials',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=400
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Error message',
+                            example='Invalid username or password'
+                        ),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            ),
+            429: openapi.Response(
+                description='Too Many Requests',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=429
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Rate limit error',
+                            example='Too many login attempts. Please try again later.'
+                        ),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
                     }
                 )
             )
         }
     )
+
     def post(self, request):
+        # Extract parameters
+        device_id = request.data.get('device_id')
+        login_input = request.data.get('login_input')
+        password = request.data.get('password')
+        device_name = request.data.get('device_name')
+        device_type = request.data.get('device_type')
+
+        # Detailed debugging
+        print("Debug Information:")
+        print(f"Device ID: {device_id}")
+        print(f"Received login_input: {login_input}")
+        print(f"Received password: {password}")
+        print(f"Settings Mobile Username: {settings.MOBILE_DEFAULT_USERNAME}")
+        print(f"Settings Mobile Password: {settings.MOBILE_DEFAULT_PASSWORD}")
+
+        # Validate required parameters
+        if not all([device_id, login_input, password]):
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Missing required parameters',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get mobile default credentials from settings
+        mobile_default_username = settings.MOBILE_DEFAULT_USERNAME
+        mobile_default_password = settings.MOBILE_DEFAULT_PASSWORD
+
+        # Validate static credentials
+        if login_input != mobile_default_username or password != mobile_default_password:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Invalid login credentials',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
         try:
-            device_id = request.data.get('device_id')
-            device_name = request.data.get('device_name')
-            device_type = request.data.get('device_type')
+            # Use default mobile user (ensure this user exists)
+            user = User.objects.get(username=mobile_default_username)
+        except User.DoesNotExist:
+            # Create default mobile user if not exists
+            user = User.objects.create_user(
+                username=mobile_default_username,
+                email=f'{mobile_default_username}@fmis.gov.kh',
+                password=mobile_default_password
+            )
 
-            if not device_id:
-                return Response({
-                    'responseCode': status.HTTP_400_BAD_REQUEST,
-                    'message': 'Device ID is required',
-                    'data': None
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Create or update mobile device record
+        try:
+            # Find or create mobile device
             device, created = MobileDevice.objects.get_or_create(
                 device_id=device_id,
                 defaults={
+                    'user': user,
+                    'is_active': True,
                     'device_name': device_name,
                     'device_type': device_type
                 }
             )
 
             # Generate tokens
-            refresh = RefreshToken.for_user(device.user)
+            refresh = RefreshToken.for_user(user)
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
@@ -687,50 +1088,6 @@ class MobileLoginView(APIView):
         except Exception as e:
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': 'Mobile login failed',
+                'message': 'Device registration failed',
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class CustomTokenRefreshView(TokenRefreshView):
-    @swagger_auto_schema(
-        operation_description="Refresh JWT Token",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['refresh'],
-            properties={
-                'refresh': openapi.Schema(type=openapi.TYPE_STRING)
-            }
-        ),
-        responses={
-            200: openapi.Response(
-                description='Token Refreshed Successfully',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'access': openapi.Schema(type=openapi.TYPE_STRING)
-                            }
-                        )
-                    }
-                )
-            )
-        }
-    )
-    def post(self, request, *args, **kwargs):
-        try:
-            response = super().post(request, *args, **kwargs)
-            return Response({
-                'responseCode': status.HTTP_200_OK,
-                'message': 'Token refreshed successfully',
-                'data': response.data
-            })
-        except Exception as e:
-            return Response({
-                'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Token refresh failed',
-                'data': None
-            }, status=status.HTTP_401_UNAUTHORIZED)
