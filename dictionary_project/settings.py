@@ -6,12 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-HOST = os.environ.get('HOST', '0.0.0.0')
-PORT = os.environ.get('PORT', '3030')
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'alkjHDOSIF9&932KDH293867*8#7')
+SECRET_KEY = os.getenv('SECRET_KEY', 'ffbbd8a89bbcff640b94da2a61109edea4ad334af9cce6371d210c519b1f131ea338773828a8ed6c612d7625d0bae7d66cf6')
 
 # Mobile Sync Credentials
 MOBILE_DEFAULT_USERNAME = os.getenv('MOBILE_DEFAULT_USERNAME', 'fmis369')
@@ -22,7 +19,7 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = [
     '172.23.23.48',
     'localhost',
-    '127.0.0.1'
+    '127.0.0.1',
 ]
 
 # Custom user model
@@ -155,6 +152,13 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('REFRESH_TOKEN_LIFETIME', 1))),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
+}
+
+MOBILE_JWT_SETTINGS = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=3),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=3),
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': False,
 }
 
 CORS_ALLOWED_ORIGINS =os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')

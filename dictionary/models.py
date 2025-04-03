@@ -183,9 +183,19 @@ class Dictionary(models.Model):
         related_name='dictionary_entries'
     )
 
+    index = models.IntegerField(unique=True)
+
     class Meta:
-        verbose_name_plural = 'Dictionary Entries'
-        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['index'],
+                name='unique_dictionary_index'
+            )
+        ]
+        indexes = [
+            models.Index(fields=['index']),
+            models.Index(fields=['word_kh', 'word_en'])
+        ]
 
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"

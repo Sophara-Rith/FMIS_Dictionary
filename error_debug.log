@@ -255,3 +255,115 @@ Traceback (most recent call last):
                                  "did you forget to set an appropriate parser class on the view?")
 drf_yasg.errors.SwaggerGenerationError: cannot add form parameters when the request has a request body; did you forget to set an appropriate parser class on the view?
 [2025-04-02 10:37:42,514] ERROR basehttp 19252 2360 - "GET /swagger/?format=openapi HTTP/1.1" 500 161204
+[2025-04-02 10:56:19,713] ERROR views 4384 19180 - Error approving staging entry: Dictionary() got unexpected keyword arguments: 'index'
+[2025-04-02 10:56:19,714] ERROR log 4384 19180 - Internal Server Error: /api/dictionary/staging/8/approve/
+[2025-04-02 10:56:19,715] ERROR basehttp 4384 19180 - "POST /api/dictionary/staging/8/approve/ HTTP/1.1" 500 55
+[2025-04-02 11:01:56,135] ERROR views 12492 10576 - Error approving staging entry: (1364, "Field 'index' doesn't have a default value")
+[2025-04-02 11:01:56,136] ERROR log 12492 10576 - Internal Server Error: /api/dictionary/staging/8/approve/
+[2025-04-02 11:01:56,137] ERROR basehttp 12492 10576 - "POST /api/dictionary/staging/8/approve/ HTTP/1.1" 500 55
+[2025-04-02 11:03:21,432] ERROR views 2788 8472 - Error approving staging entry: (1054, "Unknown column 'dictionary_staging.index' in 'field list'")
+[2025-04-02 11:03:21,433] ERROR log 2788 8472 - Internal Server Error: /api/dictionary/staging/8/approve/
+[2025-04-02 11:03:21,434] ERROR basehttp 2788 8472 - "POST /api/dictionary/staging/8/approve/ HTTP/1.1" 500 55
+[2025-04-02 11:11:58,459] ERROR views 10620 1716 - Search Error: Field name `id` is not valid for model `Dictionary` in `dictionary.serializers.DictionaryEntrySerializer`.
+[2025-04-02 11:11:58,486] ERROR log 10620 1716 - Internal Server Error: /api/dictionary/search/
+[2025-04-02 11:11:58,487] ERROR basehttp 10620 1716 - "GET /api/dictionary/search/?query=hello HTTP/1.1" 500 3756
+[2025-04-02 11:18:09,054] ERROR views 956 8716 - Search Error: Field name `id` is not valid for model `Dictionary` in `dictionary.serializers.DictionaryEntrySerializer`.
+[2025-04-02 11:18:09,085] ERROR log 956 8716 - Internal Server Error: /api/dictionary/search/
+[2025-04-02 11:18:09,087] ERROR basehttp 956 8716 - "GET /api/dictionary/search/?query=hello HTTP/1.1" 500 3756
+[2025-04-02 11:18:52,427] ERROR views 2828 17052 - Search Error: Field name `id` is not valid for model `Dictionary` in `dictionary.serializers.DictionaryEntrySerializer`.
+[2025-04-02 11:18:52,458] ERROR log 2828 17052 - Internal Server Error: /api/dictionary/search/
+[2025-04-02 11:18:52,459] ERROR basehttp 2828 17052 - "GET /api/dictionary/search/?query=hello HTTP/1.1" 500 3756
+[2025-04-03 09:30:48,647] ERROR exception 18128 4504 - Invalid HTTP_HOST header: '127.0.0.1:8000'. You may need to add '127.0.0.1' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '127.0.0.1:8000'. You may need to add '127.0.0.1' to ALLOWED_HOSTS.
+[2025-04-03 09:30:49,269] ERROR exception 18128 16224 - Invalid HTTP_HOST header: '127.0.0.1:8000'. You may need to add '127.0.0.1' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '127.0.0.1:8000'. You may need to add '127.0.0.1' to ALLOWED_HOSTS.
+[2025-04-03 11:19:17,961] ERROR log 12376 2564 - Internal Server Error: /api/users/mobile/login/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 497, in dispatch
+    self.initial(request, *args, **kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 414, in initial
+    self.perform_authentication(request)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 324, in perform_authentication
+    request.user
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\request.py", line 231, in user
+    self._authenticate()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\request.py", line 384, in _authenticate
+    user_auth_tuple = authenticator.authenticate(self)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\users\custom_auth.py", line 85, in authenticate
+    raw_token = get_authorization_header(request).decode('utf-8').split()[1]
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+IndexError: list index out of range
+[2025-04-03 11:19:17,968] ERROR basehttp 12376 2564 - "POST /api/users/mobile/login/ HTTP/1.1" 500 122395
+[2025-04-03 11:22:10,508] ERROR log 15476 6428 - Internal Server Error: /api/users/mobile/login/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 497, in dispatch
+    self.initial(request, *args, **kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 414, in initial
+    self.perform_authentication(request)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 324, in perform_authentication
+    request.user
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\request.py", line 231, in user
+    self._authenticate()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\request.py", line 384, in _authenticate
+    user_auth_tuple = authenticator.authenticate(self)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\users\custom_auth.py", line 85, in authenticate
+    raw_token = get_authorization_header(request).decode('utf-8').split()[1]
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+IndexError: list index out of range
+[2025-04-03 11:22:10,518] ERROR basehttp 15476 6428 - "POST /api/users/mobile/login/ HTTP/1.1" 500 122395

@@ -55,11 +55,20 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Dictionary
-        fields = '__all__'
+        fields = [
+            'index',
+            'word_kh',
+            'word_en',
+            'word_kh_type',
+            'word_en_type',
+            'word_kh_definition',
+            'word_en_definition',
+            'example_sentence_kh',
+            'example_sentence_en'
+        ]
         read_only_fields = ['created_at', 'index', 'created_by']
 
     def get_created_by(self, obj):
-        # Return username instead of user ID
         return obj.created_by.username if obj.created_by else None
 
 class StagingEntrySerializer(serializers.ModelSerializer):
@@ -150,15 +159,15 @@ class BookmarkSerializer(serializers.ModelSerializer):
         return {
             "word_id": word.id,
             "word_kh": word.word_kh,
-            "word_kh_type": word.word_kh_type,
-            "word_kh_definition": word.word_kh_definition,
             "word_en": word.word_en,
             "word_en_type": word.word_en_type,
+            "word_kh_type": word.word_kh_type,
+            "word_kh_definition": word.word_kh_definition,
             "word_en_definition": word.word_en_definition,
-            "pronunciation_kh": word.pronunciation_kh,
-            "pronunciation_en": word.pronunciation_en,
-            "example_sentence_kh": word.example_sentence_kh,
-            "example_sentence_en": word.example_sentence_en
+            # "pronunciation_kh": word.pronunciation_kh,
+            # "pronunciation_en": word.pronunciation_en,
+            # "example_sentence_kh": word.example_sentence_kh,
+            # "example_sentence_en": word.example_sentence_en
         }
 
 class DictionaryEntrySyncSerializer(serializers.ModelSerializer):

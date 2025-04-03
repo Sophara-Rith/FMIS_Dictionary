@@ -905,6 +905,7 @@ class CustomTokenBlacklistView(TokenBlacklistView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class MobileLoginView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
@@ -1014,20 +1015,14 @@ class MobileLoginView(APIView):
     )
 
     def post(self, request):
+        # Specific mobile login credentials
+        MOBILE_LOGIN_USERNAME = 'fmis369'
+        MOBILE_LOGIN_PASSWORD = 'Fmis@dic2O@$'
+
         # Extract parameters
         device_id = request.data.get('device_id')
         login_input = request.data.get('login_input')
         password = request.data.get('password')
-        device_name = request.data.get('device_name')
-        device_type = request.data.get('device_type')
-
-        # Detailed debugging
-        print("Debug Information:")
-        print(f"Device ID: {device_id}")
-        print(f"Received login_input: {login_input}")
-        print(f"Received password: {password}")
-        print(f"Settings Mobile Username: {settings.MOBILE_DEFAULT_USERNAME}")
-        print(f"Settings Mobile Password: {settings.MOBILE_DEFAULT_PASSWORD}")
 
         # Validate required parameters
         if not all([device_id, login_input, password]):
@@ -1037,43 +1032,45 @@ class MobileLoginView(APIView):
                 'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get mobile default credentials from settings
-        mobile_default_username = settings.MOBILE_DEFAULT_USERNAME
-        mobile_default_password = settings.MOBILE_DEFAULT_PASSWORD
-
-        # Validate static credentials
-        if login_input != mobile_default_username or password != mobile_default_password:
+        # Validate login credentials specifically for mobile
+        if (login_input != MOBILE_LOGIN_USERNAME or
+            password != MOBILE_LOGIN_PASSWORD):
             return Response({
                 'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Invalid login credentials',
+                'message': 'Invalid mobile credentials',
                 'data': None
             }, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
-            # Use default mobile user (ensure this user exists)
-            user = User.objects.get(username=mobile_default_username)
-        except User.DoesNotExist:
-            # Create default mobile user if not exists
-            user = User.objects.create_user(
-                username=mobile_default_username,
-                email=f'{mobile_default_username}@fmis.gov.kh',
-                password=mobile_default_password
-            )
-
-        try:
-            # Find or create mobile device
-            device, created = MobileDevice.objects.get_or_create(
-                device_id=device_id,
+            # Find or create mobile user
+            user, created = User.objects.get_or_create(
+                username=MOBILE_LOGIN_USERNAME,
                 defaults={
-                    'user': user,
-                    'is_active': True,
-                    'device_name': device_name,
-                    'device_type': device_type
+                    'email': f'{MOBILE_LOGIN_USERNAME}@mobile.app',
+                    'is_active': True
                 }
             )
 
-            # Generate tokens
+            # Set password only if user is newly created
+            if created:
+                user.set_password(MOBILE_LOGIN_PASSWORD)
+                user.save()
+
+            # Create or update mobile device
+            mobile_device, device_created = MobileDevice.objects.get_or_create(
+                device_id=device_id,
+                defaults={
+                    'user': user,
+                    'is_active': True
+                }
+            )
+
+            # Generate mobile-specific tokens with 3-day lifetime
+            from rest_framework_simplejwt.tokens import RefreshToken
             refresh = RefreshToken.for_user(user)
+
+            # Optional: Add custom claims
+            refresh['device_id'] = device_id
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
@@ -1081,13 +1078,64 @@ class MobileLoginView(APIView):
                 'data': {
                     'refresh': str(refresh),
                     'access': str(refresh.access_token),
-                    'device_id': device.device_id
+                    'device_id': device_id,
                 }
             })
 
         except Exception as e:
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': 'Device registration failed',
+                'message': 'Mobile login failed',
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PublicTestEndpoint(APIView):
+    permission_classes = [AllowAny]  # No authentication required
+
+    @swagger_auto_schema(
+        operation_description="Public Test Endpoint - No Authentication Required",
+        responses={
+            200: openapi.Response(
+                description='Successful Test Response',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=200
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Test endpoint message',
+                            example='API is working perfectly!'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'timestamp': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Current server timestamp'
+                                ),
+                                'version': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='API version'
+                                )
+                            }
+                        )
+                    }
+                )
+            )
+        }
+    )
+    def get(self, request):
+        from datetime import datetime
+
+        return Response({
+            'responseCode': status.HTTP_200_OK,
+            'message': 'API is working perfectly!',
+            'data': {
+                'timestamp': datetime.now().isoformat(),
+                'version': 'v0.8'
+            }
+        })

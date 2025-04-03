@@ -1,80 +1,130 @@
 import requests
-import os
-from dotenv import load_dotenv
+import time
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s: %(message)s',
+    filename='staging_approval.log'
+)
 
-class StagingEntryApprover:
-    def __init__(self, base_url, username, password):
-        """
-        Initialize the approver with authentication credentials
+# Configuration
+BASE_URL = 'http://172.23.23.48:9991/api/dictionary/staging/{}/approve/'
+TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQzNTcwNDIwLCJpYXQiOjE3NDM1NjY4MjAsImp0aSI6IjViY2JlZWQ5MDQ3OTRkMTk5MzE2Yjk3ZmVmMGQxZTkyIiwidXNlcl9pZCI6NX0.yht98oz4zfVkD848NVXGG2zmSfOZzS5DfSF67JRHVM8'  # Replace with your actual bearer token
 
-        :param base_url: Base URL of the API
-        :param username: Admin username
-        :param password: Admin password
-        """
-        self.base_url = base_url.rstrip('/')
-        self.username = 'sophara12345'
-        self.password = 'Fmi$2025'
-        self.token = self.get_access_token()
+# Headers for the request
+HEADERS = {
+    'Authorization': f'Bearer {TOKEN}',
+    'Content-Type': 'application/json'
+}
 
-    def approve_staging_entry(self, entry_id):
-        """
-        Approve a specific staging entry
+def approve_staging_entry(entry_id):
+    """
+    Approve a single staging entry
 
-        :param entry_id: ID of the staging entry to approve
-        :return: Response from the approval endpoint
-        """
-        approve_url = f"{self.base_url}/api/dictionary/staging/{entry_id}/approve/"
-        headers = {
-            'Authorization': f'Bearer {self.token}',
-            'Content-Type': 'application/json'
-        }
+    :param entry_id: ID of the staging entry to approve
+    :return: Tuple of (entry_id, success_status, response_message)
+    """
+    try:
+        # Construct the full URL
+        url = BASE_URL.format(entry_id)
 
-        try:
-            response = requests.post(approve_url, headers=headers)
-            response.raise_for_status()
-            return response
-        except requests.exceptions.RequestException as e:
-            print(f"Error approving entry {entry_id}: {e}")
-            return None
+        # Send POST request to approve the entry
+        response = requests.post(url, headers=HEADERS)
 
-def main():
-    # Retrieve credentials from environment variables
-    BASE_URL = 'http://127.0.0.1:3030'
-    ADMIN_USERNAME = 'sophara12345'
-    ADMIN_PASSWORD = 'Fmi$2025'
+        # Check the response
+        if response.status_code in [200, 201]:
+            logging.info(f"Successfully approved staging entry {entry_id}")
+            return entry_id, True, "Approved successfully"
+        else:
+            logging.error(f"Failed to approve staging entry {entry_id}. Status: {response.status_code}, Response: {response.text}")
+            return entry_id, False, response.text
 
-    if not all([BASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD]):
-        print("Please set BASE_URL, ADMIN_USERNAME, and ADMIN_PASSWORD in your .env file")
-        return
+    except requests.RequestException as e:
+        logging.error(f"Request error for entry {entry_id}: {str(e)}")
+        return entry_id, False, str(e)
+    except Exception as e:
+        logging.error(f"Unexpected error for entry {entry_id}: {str(e)}")
+        return entry_id, False, str(e)
 
-    # Initialize the approver
-    approver = StagingEntryApprover(BASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD)
+def bulk_approve_entries(start_id=9, end_id=88, max_workers=5):
+    """
+    Bulk approve staging entries with concurrent processing
 
-    # Approve entries from ID 1 to 32
+    :param start_id: Starting ID of staging entries
+    :param end_id: Ending ID of staging entries
+    :param max_workers: Maximum number of concurrent threads
+    """
+    # Track results
     successful_approvals = []
     failed_approvals = []
 
-    for entry_id in range(1, 33):
-        print(f"Attempting to approve staging entry {entry_id}...")
-        response = approver.approve_staging_entry(entry_id)
+    # Use ThreadPoolExecutor for concurrent processing
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Create futures for all entries
+        futures = {
+            executor.submit(approve_staging_entry, entry_id): entry_id
+            for entry_id in range(start_id, end_id + 1)
+        }
 
-        if response and response.status_code == 200:
-            print(f"✅ Successfully approved entry {entry_id}")
-            successful_approvals.append(entry_id)
-        else:
-            print(f"❌ Failed to approve entry {entry_id}")
-            failed_approvals.append(entry_id)
+        # Process results as they complete
+        for future in as_completed(futures):
+            entry_id = futures[future]
+            try:
+                # Get the result of the future
+                _, success, message = future.result()
 
-    # Summary report
-    print("\n--- Approval Summary ---")
-    print(f"Total Entries Processed: {len(range(1, 33))}")
-    print(f"Successful Approvals: {len(successful_approvals)}")
-    print(f"Failed Approvals: {len(failed_approvals)}")
+                if success:
+                    successful_approvals.append(entry_id)
+                else:
+                    failed_approvals.append((entry_id, message))
 
+                # Optional: Add a small delay between requests to prevent rate limiting
+                time.sleep(0.5)
+
+            except Exception as e:
+                failed_approvals.append((entry_id, str(e)))
+
+    # Log summary
+    logging.info("\n--- APPROVAL SUMMARY ---")
+    logging.info(f"Total Entries Processed: {len(range(start_id, end_id + 1))}")
+    logging.info(f"Successful Approvals: {len(successful_approvals)}")
+    logging.info(f"Failed Approvals: {len(failed_approvals)}")
+
+    # Detailed logging of failures
     if failed_approvals:
-        print("Failed Entry IDs:", failed_approvals)
+        logging.error("Failed Entries:")
+        for entry_id, message in failed_approvals:
+            logging.error(f"Entry {entry_id}: {message}")
 
-if __name__ == "__main__":
+    return successful_approvals, failed_approvals
+
+def main():
+    # Retry mechanism for failed entries
+    start_id, end_id = 9, 88
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        logging.info(f"\nApproval Attempt {attempt + 1}")
+
+        successful, failed = bulk_approve_entries(start_id, end_id)
+
+        # If no failures, we're done
+        if not failed:
+            logging.info("All entries approved successfully!")
+            break
+
+        # Prepare for retry with only failed entries
+        failed_ids = [entry_id for entry_id, _ in failed]
+        start_id = min(failed_ids)
+        end_id = max(failed_ids)
+
+        # Wait before retry
+        time.sleep(5)
+
+    logging.info("Bulk approval process completed.")
+
+if __name__ == '__main__':
     main()

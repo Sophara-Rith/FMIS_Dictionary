@@ -13,7 +13,6 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle, AnonRateThrottle
 from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -21,15 +20,13 @@ from django.utils import timezone
 from django.http import FileResponse
 from django.core.cache import cache
 from django.conf import settings
-from django.db.models import Q
-from django.core.paginator import Paginator, EmptyPage, InvalidPage
+from django.db.models import Q, Max
 from .models import Dictionary, Staging, Bookmark, WordType
 from .serializers import (
     DictionaryEntrySerializer,
     BookmarkSerializer,
     StagingEntrySerializer,
     StagingEntryCreateSerializer,
-    DictionaryEntrySyncSerializer
 )
 from debug_utils import debug_error
 from .tasks import process_staging_bulk_import
@@ -46,7 +43,7 @@ class DictionaryEntryListView(APIView):
             openapi.Parameter(
                 'language',
                 openapi.IN_QUERY,
-                description="Filter entries by language (KH-EN or EN-KH)",
+                description="Filter entries by language (kh or en)",
                 type=openapi.TYPE_STRING
             ),
             openapi.Parameter(
@@ -258,63 +255,42 @@ class StagingEntryCreateView(APIView):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-class StagingEntryApproveView(APIView):
-    permission_classes = [IsAdminUser]
+def generate_next_index():
+    """
+    Generate the next sequential index for Dictionary entries
+    """
+    try:
+        # Get the maximum current index, default to 0 if no entries exist
+        max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
+        return max_index + 1
+    except Exception as e:
+        logger.error(f"Error generating index: {e}")
+        # Fallback mechanism
+        return Dictionary.objects.count() + 1
 
-    @swagger_auto_schema(
-        operation_description="Approve a staging entry and add to dictionary",
-        responses={
-            200: openapi.Response(
-                description='Staging entry approved and added to dictionary',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'entry': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'word': openapi.Schema(type=openapi.TYPE_STRING),
-                                'definition': openapi.Schema(type=openapi.TYPE_STRING),
-                            }
-                        )
-                    }
-                )
-            ),
-            404: 'Staging Entry Not Found'
-        }
-    )
-    @debug_error
-    def post(self, request, pk):
+class StagingEntryApproveView(APIView):
+    def post(self, request, staging_id):
         try:
             # Retrieve the staging entry
-            staging_entry = Staging.objects.get(pk=pk)
+            staging_entry = Staging.objects.get(id=staging_id)
 
-            # Create dictionary entry with all relevant fields
+            # Generate next index
+            next_index = generate_next_index()
+
+            # Create Dictionary entry
             dictionary_entry = Dictionary.objects.create(
-                index=staging_entry.id,
-
-                # Core word fields
+                index=next_index,  # Explicitly set the index
                 word_kh=staging_entry.word_kh,
                 word_en=staging_entry.word_en,
-
-                # Word type fields
                 word_kh_type=staging_entry.word_kh_type,
                 word_en_type=staging_entry.word_en_type,
-
-                # Definition fields
                 word_kh_definition=staging_entry.word_kh_definition,
                 word_en_definition=staging_entry.word_en_definition,
-
-                # Optional fields
                 pronunciation_kh=staging_entry.pronunciation_kh,
                 pronunciation_en=staging_entry.pronunciation_en,
                 example_sentence_kh=staging_entry.example_sentence_kh,
                 example_sentence_en=staging_entry.example_sentence_en,
-
-                # Metadata
-                created_by=request.user,  # The admin who approves the entry
-                created_at=timezone.now()
+                created_by=request.user
             )
 
             # Update staging entry status
@@ -323,30 +299,20 @@ class StagingEntryApproveView(APIView):
             staging_entry.reviewed_at = timezone.now()
             staging_entry.save()
 
-            # Delete the staging entry after approval
-            staging_entry.delete()
-
             return Response({
-                'message': 'Entry approved and added to dictionary',
-                'entry': {
-                    'id': dictionary_entry.index,
-                    'word_kh': dictionary_entry.word_kh,
-                    'word_en': dictionary_entry.word_en
-                }
-            }, status=status.HTTP_200_OK)
+                'message': 'Entry approved successfully',
+                'index': next_index
+            }, status=status.HTTP_201_CREATED)
 
         except Staging.DoesNotExist:
-            return Response(
-                {'error': 'Staging entry not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({
+                'error': 'Staging entry not found'
+            }, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            # Log the error for debugging
-            logger.error(f"Error approving staging entry: {str(e)}")
-            return Response(
-                {'error': 'An error occurred while approving the entry'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            logger.error(f"Approval error: {e}")
+            return Response({
+                'error': 'An unexpected error occurred during approval'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class StagingEntryRejectView(APIView):
     permission_classes = [IsAdminUser]
@@ -609,13 +575,13 @@ class DictionarySearchView(APIView):
         for field in search_fields:
             field_conditions = []
 
-            if language in ['KH-EN', 'ALL']:
+            if language in ['kh', 'ALL']:
                 field_conditions.extend([
                     Q(**{f'{mapped_field}__icontains': query})
                     for mapped_field in field_mapping[field] if 'kh' in mapped_field
                 ])
 
-            if language in ['EN-KH', 'ALL']:
+            if language in ['en', 'ALL']:
                 field_conditions.extend([
                     Q(**{f'{mapped_field}__icontains': query})
                     for mapped_field in field_mapping[field] if 'en' in mapped_field
@@ -639,8 +605,8 @@ class DictionarySearchView(APIView):
         - Pagination support
 
         Language Options:
-        - KH-EN: Search Khmer to English
-        - EN-KH: Search English to Khmer
+        - kh: Search Khmer to English
+        - en: Search English to Khmer
         - ALL: Search across both languages (default)
 
         Search Fields:
@@ -655,10 +621,10 @@ class DictionarySearchView(APIView):
         ```
         2. Multilingual search
         ```
-        GET /api/dictionary/search/?query=សួស្ដី&language=KH-EN&search_fields=word
+        GET /api/dictionary/search/?query=សួស្ដី&language=kh&search_fields=word
         ```
         ```
-        GET /api/dictionary/search/?query=hello&language=EN-KH&search_fields=word
+        GET /api/dictionary/search/?query=hello&language=en&search_fields=word
         ```
         3. Comprehensive content search
         ```
@@ -682,7 +648,7 @@ class DictionarySearchView(APIView):
                 in_=openapi.IN_QUERY,
                 type=openapi.TYPE_STRING,
                 description='Language search direction',
-                enum=['KH-EN', 'EN-KH', 'ALL'],
+                enum=['kh', 'en', 'ALL'],
                 default='ALL'
             ),
             openapi.Parameter(
@@ -1009,7 +975,7 @@ class StagingBulkImportView(APIView):
             return Response({
                 'total_entries': len(df),
                 'successful_entries': len(successful_entries),
-                'details': successful_entries,
+                'successful_details': successful_entries,
                 'failed_entries': failed_entries
             }, status=status.HTTP_200_OK if len(failed_entries) < len(df) else status.HTTP_400_BAD_REQUEST)
 
@@ -1591,12 +1557,19 @@ class DictionarySyncView(APIView):
         return 'UNCHANGED'
 
 class DictionarySyncAllView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         operation_description="Full Dictionary Synchronization",
         tags=['mobile'],
         manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique Device Identifier',
+                required=True
+            ),
             openapi.Parameter(
                 'page',
                 openapi.IN_QUERY,
@@ -1634,7 +1607,8 @@ class DictionarySyncAllView(APIView):
                                             'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
                                             'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
                                             'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING)
+                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'is_bookmark': openapi.Schema(type=openapi.TYPE_INTEGER)
                                         }
                                     )
                                 )
@@ -1647,6 +1621,16 @@ class DictionarySyncAllView(APIView):
     )
     def get(self, request):
         try:
+            # Get device ID from request headers
+            device_id = request.headers.get('X-Device-ID')
+
+            if not device_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Device ID is required',
+                    'data': []
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Safely get pagination parameters
             page = max(1, int(request.GET.get('page', 1)))
             per_page = max(1, int(request.GET.get('per_page', 25)))
@@ -1662,6 +1646,12 @@ class DictionarySyncAllView(APIView):
             # Fetch entries with optimized queryset
             entries = Dictionary.objects.order_by('id')[start:end]
 
+            # Get bookmarked word IDs for this device
+            bookmarked_word_ids = set(
+                Bookmark.objects.filter(device_id=device_id)
+                .values_list('word_id', flat=True)
+            )
+
             # Prepare last and current sync timestamps
             last_sync_timestamp = (timezone.now() - timezone.timedelta(minutes=2)).isoformat()
             current_sync_timestamp = timezone.now().isoformat()
@@ -1676,7 +1666,8 @@ class DictionarySyncAllView(APIView):
                         'word_kh_type': entry.word_kh_type,
                         'word_en_type': entry.word_en_type,
                         'word_kh_definition': entry.word_kh_definition,
-                        'word_en_definition': entry.word_en_definition
+                        'word_en_definition': entry.word_en_definition,
+                        'is_bookmark': 1 if entry.id in bookmarked_word_ids else 0
                     } for entry in entries
                 ],
                 'total_entries': total_entries,
