@@ -367,3 +367,133 @@ Traceback (most recent call last):
                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
 IndexError: list index out of range
 [2025-04-03 11:22:10,518] ERROR basehttp 15476 6428 - "POST /api/users/mobile/login/ HTTP/1.1" 500 122395
+[2025-04-04 11:46:08,743] ERROR log 20764 21140 - Internal Server Error: /api/dictionary/bookmarks/
+[2025-04-04 11:46:08,746] ERROR basehttp 20764 21140 - "GET /api/dictionary/bookmarks/ HTTP/1.1" 500 192
+[2025-04-04 15:28:59,994] ERROR log 20920 1212 - Internal Server Error: /api/dictionary/staging/89/approve/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+TypeError: StagingEntryApproveView.post() got an unexpected keyword argument 'pk'
+[2025-04-04 15:29:00,001] ERROR basehttp 20920 1212 - "POST /api/dictionary/staging/89/approve/ HTTP/1.1" 500 104032
+[2025-04-04 15:35:32,809] ERROR log 20776 9600 - Internal Server Error: /api/dictionary/staging/89/approve/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+TypeError: StagingEntryApproveView.post() got an unexpected keyword argument 'pk'
+[2025-04-04 15:35:32,816] ERROR basehttp 20776 9600 - "POST /api/dictionary/staging/89/approve/ HTTP/1.1" 500 104032
+[2025-04-04 15:36:33,992] ERROR log 9628 12816 - Internal Server Error: /api/dictionary/staging/89/approve/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+TypeError: StagingEntryApproveView.post() got an unexpected keyword argument 'pk'
+[2025-04-04 15:36:33,999] ERROR basehttp 9628 12816 - "POST /api/dictionary/staging/89/approve/ HTTP/1.1" 500 104032
+[2025-04-04 16:15:21,560] ERROR log 22540 7644 - Internal Server Error: /api/dictionary/staging/93/approve/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project - Copy\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+TypeError: StagingEntryApproveView.post() got an unexpected keyword argument 'pk'
+[2025-04-04 16:15:21,569] ERROR basehttp 22540 7644 - "POST /api/dictionary/staging/93/approve/ HTTP/1.1" 500 104032
+[2025-04-05 22:53:15,188] ERROR log 11608 5548 - Internal Server Error: /api/dictionary/sync_all/
+[2025-04-05 22:53:15,190] ERROR basehttp 11608 5548 - "GET /api/dictionary/sync_all/?per_page=20 HTTP/1.1" 500 179
+[2025-04-05 23:28:44,965] ERROR log 17616 23064 - Internal Server Error: /api/dictionary/staging/create/
+[2025-04-05 23:28:44,966] ERROR basehttp 17616 23064 - "POST /api/dictionary/staging/create/ HTTP/1.1" 500 7830
+[2025-04-05 23:41:48,374] ERROR log 22032 18260 - Internal Server Error: /api/dictionary/staging/create/
+[2025-04-05 23:41:48,375] ERROR basehttp 22032 18260 - "POST /api/dictionary/staging/create/ HTTP/1.1" 500 7827
+[2025-04-05 23:43:37,386] ERROR log 15056 6620 - Internal Server Error: /api/dictionary/staging/create/
+[2025-04-05 23:43:37,387] ERROR basehttp 15056 6620 - "POST /api/dictionary/staging/create/ HTTP/1.1" 500 7788
+[2025-04-05 23:44:05,042] ERROR log 15056 6620 - Internal Server Error: /api/dictionary/staging/create/
+[2025-04-05 23:44:05,042] ERROR basehttp 15056 6620 - "POST /api/dictionary/staging/create/ HTTP/1.1" 500 7788
+[2025-04-05 23:45:10,846] ERROR log 5540 6192 - Internal Server Error: /api/dictionary/staging/create/
+[2025-04-05 23:45:10,847] ERROR basehttp 5540 6192 - "POST /api/dictionary/staging/create/ HTTP/1.1" 500 7788
+[2025-04-05 23:45:12,536] ERROR log 5540 6192 - Internal Server Error: /api/dictionary/staging/create/
+[2025-04-05 23:45:12,537] ERROR basehttp 5540 6192 - "POST /api/dictionary/staging/create/ HTTP/1.1" 500 7788
+[2025-04-06 01:26:38,613] ERROR log 14028 17020 - Internal Server Error: /api/dictionary/staging/create/
+[2025-04-06 01:26:38,614] ERROR basehttp 14028 17020 - "POST /api/dictionary/staging/create/ HTTP/1.1" 500 1473
+[2025-04-06 01:58:16,782] ERROR log 19216 11832 - Internal Server Error: /api/dictionary/staging/7/approve/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+TypeError: StagingEntryApproveView.post() got an unexpected keyword argument 'pk'
+[2025-04-06 01:58:16,786] ERROR basehttp 19216 11832 - "POST /api/dictionary/staging/7/approve/ HTTP/1.1" 500 103763
+[2025-04-06 02:53:59,157] ERROR log 1596 9736 - Internal Server Error: /api/dictionary/bookmarks/
+[2025-04-06 02:53:59,158] ERROR basehttp 1596 9736 - "POST /api/dictionary/bookmarks/ HTTP/1.1" 500 186

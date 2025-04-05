@@ -3,6 +3,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.core.validators import MinLengthValidator
+from django.core.exceptions import ValidationError
 
 class WordType:
     WORD_TYPE_CHOICES_EN = [
@@ -65,7 +66,6 @@ class Staging(models.Model):
 
     id = models.BigAutoField(primary_key=True)
 
-    # Word Fields
     word_kh = models.CharField(
         max_length=255,
         verbose_name='Khmer Word',
@@ -77,7 +77,6 @@ class Staging(models.Model):
         validators=[MinLengthValidator(1, "English word cannot be empty")]
     )
 
-    # Type Fields
     word_kh_type = models.CharField(
         max_length=50,
         choices=WordType.WORD_TYPE_CHOICES_KH,
@@ -89,41 +88,13 @@ class Staging(models.Model):
         verbose_name='English Word Type'
     )
 
-    # Definition Fields
     word_kh_definition = models.TextField(
-        verbose_name='Khmer Word Definition',
-        validators=[MinLengthValidator(5, "Definition must be at least 5 characters")]
+        verbose_name='Khmer Word Definition'
     )
     word_en_definition = models.TextField(
-        verbose_name='English Word Definition',
-        validators=[MinLengthValidator(5, "Definition must be at least 5 characters")]
+verbose_name='English Word Definition'
     )
 
-    # Tracking Fields
-    created_at = models.DateTimeField(default=timezone.now)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        related_name='staging_entries',
-        null=True
-    )
-
-    # Review Fields
-    review_status = models.CharField(
-        max_length=20,
-        choices=REVIEW_STATUS_CHOICES,
-        default='PENDING'
-    )
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        related_name='reviewed_staging_entries',
-        null=True,
-        blank=True
-    )
-
-    # Optional Additional Fields
     pronunciation_kh = models.CharField(
         max_length=255,
         null=True,
@@ -149,18 +120,47 @@ class Staging(models.Model):
         verbose_name='Example Sentence in English'
     )
 
+    created_at = models.DateTimeField(default=timezone.now)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='staging_entries',
+        null=True
+    )
+
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='reviewed_staging_entries',
+        null=True,
+        blank=True
+    )
+
+    review_status = models.CharField(
+        max_length=20,
+        choices=REVIEW_STATUS_CHOICES,
+        default='PENDING'
+    )
+
+    is_parent = models.BooleanField(default=False)
+    is_child = models.BooleanField(default=False)
+
     class Meta:
         verbose_name_plural = 'Staging Dictionary Entries'
         unique_together = [['word_kh', 'word_en']]
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['is_parent']),
+            models.Index(fields=['is_child'])
+        ]
 
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"
 
 class Dictionary(models.Model):
-    # Ensure you have an 'id' field (which should be automatic)
+    # Existing fields
     id = models.AutoField(primary_key=True)
-
     word_kh = models.CharField(max_length=255)
     word_en = models.CharField(max_length=255)
     word_kh_type = models.CharField(max_length=50)
@@ -182,8 +182,19 @@ class Dictionary(models.Model):
         null=True,
         related_name='dictionary_entries'
     )
-
     index = models.IntegerField(unique=True)
+
+    # New fields for parent-child relationship
+    is_parent = models.BooleanField(default=False)
+    is_child = models.BooleanField(default=False)
+
+    def clean(self):
+        if self.is_parent and self.is_child:
+            raise ValidationError("A word cannot be both parent and child simultaneously.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     class Meta:
         constraints = [
@@ -194,11 +205,48 @@ class Dictionary(models.Model):
         ]
         indexes = [
             models.Index(fields=['index']),
-            models.Index(fields=['word_kh', 'word_en'])
+            models.Index(fields=['word_kh', 'word_en']),
+            models.Index(fields=['is_parent']),
+            models.Index(fields=['is_child'])
         ]
 
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"
+
+class RelatedWord(models.Model):
+    RELATIONSHIP_CHOICES = [
+        ('DERIVATIVE', 'Derivative'),
+        ('COMPOUND', 'Compound Word'),
+        ('PHRASE', 'Phrase'),
+        ('OTHER', 'Other')
+    ]
+
+    parent_word = models.ForeignKey(
+        'Dictionary',
+        on_delete=models.CASCADE,
+        related_name='child_words'
+    )
+    child_word = models.ForeignKey(
+        'Dictionary',
+        on_delete=models.CASCADE,
+        related_name='parent_words'
+    )
+    relationship_type = models.CharField(
+        max_length=50,
+        choices=RELATIONSHIP_CHOICES,
+        default='OTHER'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('parent_word', 'child_word')
+        indexes = [
+            models.Index(fields=['parent_word']),
+            models.Index(fields=['child_word'])
+        ]
+
+    def __str__(self):
+        return f"{self.parent_word.word_en} -> {self.child_word.word_en}"
 
 class Bookmark(models.Model):
     device_id = models.CharField(max_length=255)

@@ -2,6 +2,7 @@
 from rest_framework import serializers
 from .models import Staging, Dictionary, WordType, Bookmark
 from django.utils import timezone
+from django.db.models import Q
 
 class StagingDictionaryEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
@@ -50,27 +51,6 @@ class StagingDictionaryEntrySerializer(serializers.ModelSerializer):
         validated_data['review_status'] = 'PENDING'
         return super().create(validated_data)
 
-class DictionaryEntrySerializer(serializers.ModelSerializer):
-    created_by = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Dictionary
-        fields = [
-            'index',
-            'word_kh',
-            'word_en',
-            'word_kh_type',
-            'word_en_type',
-            'word_kh_definition',
-            'word_en_definition',
-            'example_sentence_kh',
-            'example_sentence_en'
-        ]
-        read_only_fields = ['created_at', 'index', 'created_by']
-
-    def get_created_by(self, obj):
-        return obj.created_by.username if obj.created_by else None
-
 class StagingEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
     reviewed_by = serializers.SerializerMethodField()
@@ -95,18 +75,29 @@ class StagingEntryCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Staging
         fields = [
-            'id', 'word_kh', 'word_kh_type', 'word_kh_definition',
-            'word_en', 'word_en_type', 'word_en_definition',
-            'pronunciation_kh', 'pronunciation_en',
-            'example_sentence_kh', 'example_sentence_en'
+            'word_kh',
+            'word_en',
+            'word_kh_type',
+            'word_en_type',
+            'word_kh_definition',
+            'word_en_definition',
+            'pronunciation_kh',
+            'pronunciation_en',
+            'example_sentence_kh',
+            'example_sentence_en'
         ]
         extra_kwargs = {
-            'id': {'read_only': True},  # Make id read-only
             'pronunciation_kh': {'required': False},
             'pronunciation_en': {'required': False},
             'example_sentence_kh': {'required': False},
             'example_sentence_en': {'required': False}
         }
+
+    def create(self, validated_data):
+        # Automatically set created_by and review_status
+        validated_data['created_by'] = self.context['request'].user
+        validated_data['review_status'] = 'PENDING'
+        return super().create(validated_data)
 
     def validate(self, data):
         """
@@ -141,18 +132,12 @@ class StagingEntryCreateSerializer(serializers.ModelSerializer):
 
         return data
 
-    def create(self, validated_data):
-        # Automatically set created_by to current user
-        validated_data['created_by'] = self.context['request'].user
-        validated_data['review_status'] = 'PENDING'
-        return super().create(validated_data)
-
 class BookmarkSerializer(serializers.ModelSerializer):
     word_details = serializers.SerializerMethodField()
 
     class Meta:
         model = Bookmark
-        fields = ['word_details', 'created_at']
+        fields = ["id", "word"]
 
     def get_word_details(self, obj):
         word = obj.word
@@ -164,11 +149,93 @@ class BookmarkSerializer(serializers.ModelSerializer):
             "word_kh_type": word.word_kh_type,
             "word_kh_definition": word.word_kh_definition,
             "word_en_definition": word.word_en_definition,
+            "created_at": word.created_at.isoformat()
             # "pronunciation_kh": word.pronunciation_kh,
             # "pronunciation_en": word.pronunciation_en,
             # "example_sentence_kh": word.example_sentence_kh,
             # "example_sentence_en": word.example_sentence_en
         }
+
+
+class DictionaryEntrySerializer(serializers.ModelSerializer):
+    word_related = serializers.SerializerMethodField()
+    is_bookmark = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Dictionary
+        fields = [
+            'id',
+            'word_kh',
+            'word_en',
+            'word_kh_type',
+            'word_en_type',
+            'word_kh_definition',
+            'word_en_definition',
+            'is_bookmark',
+            'is_parent',
+            'word_related'
+        ]
+
+    def get_word_related(self, obj):
+        # If is_parent is True, find related words
+        if obj.is_parent:
+            # Find words that contain the parent word
+            related_words = Dictionary.objects.filter(
+                Q(word_en__contains=obj.word_en) |
+                Q(word_kh__contains=obj.word_kh)
+            ).exclude(id=obj.id)
+
+            if related_words.exists():
+                return [
+                    {
+                        'id': rw.id,
+                        'word_kh': rw.word_kh,
+                        'word_en': rw.word_en,
+                        'word_kh_type': rw.word_kh_type,
+                        'word_en_type': rw.word_en_type,
+                        'word_kh_definition': rw.word_kh_definition,
+                        'word_en_definition': rw.word_en_definition,
+                        'is_bookmark': 0,
+                        'is_child': True
+                    } for rw in related_words
+                ]
+
+            return {"message": "There is no related word."}
+
+        return {"message": "There is no related word."}
+
+    def get_is_bookmark(self, obj):
+        # Get request from context
+        request = self.context.get('request')
+        if not request:
+            return 0
+
+        # Get device ID from headers
+        device_id = request.headers.get('X-Device-ID')
+        if not device_id:
+            return 0
+
+        # Check if the word is bookmarked for this device
+        from .models import Bookmark
+        bookmark_exists = Bookmark.objects.filter(
+            device_id=device_id,
+            word=obj
+        ).exists()
+
+        return 1 if bookmark_exists else 0
+
+    def validate(self, data):
+        # Ensure is_parent and is_child are mutually exclusive
+        is_parent = data.get('is_parent', self.instance.is_parent if self.instance else False)
+        is_child = data.get('is_child', self.instance.is_child if self.instance else False)
+
+        if is_parent and is_child:
+            raise serializers.ValidationError("A word cannot be both parent and child simultaneously.")
+
+        return data
+
+    def get_created_by(self, obj):
+        return obj.created_by.username if obj.created_by else None
 
 class DictionaryEntrySyncSerializer(serializers.ModelSerializer):
     sync_status = serializers.SerializerMethodField()
@@ -207,7 +274,18 @@ class DictionaryEntrySyncSerializer(serializers.ModelSerializer):
 
         return 'UNCHANGED'
 
-class DictionaryEntrySerializer(serializers.ModelSerializer):
+class DictionarySearchSerializer(serializers.Serializer):
+    # Custom serializer for search results with additional metadata
+    results = DictionaryEntrySerializer(many=True)
+    total_results = serializers.IntegerField()
+    page = serializers.IntegerField()
+    total_pages = serializers.IntegerField()
+    search_query = serializers.CharField()
+    search_language = serializers.CharField()
+    search_fields = serializers.ListField(child=serializers.CharField())
+
+
+class RelatedWordSerializer(serializers.ModelSerializer):
     class Meta:
         model = Dictionary
         fields = [
@@ -218,16 +296,6 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             'word_en_type',
             'word_kh_definition',
             'word_en_definition',
-            'example_sentence_kh',
-            'example_sentence_en'
+            'is_parent',
+            'is_child'
         ]
-
-class DictionarySearchSerializer(serializers.Serializer):
-    # Custom serializer for search results with additional metadata
-    results = DictionaryEntrySerializer(many=True)
-    total_results = serializers.IntegerField()
-    page = serializers.IntegerField()
-    total_pages = serializers.IntegerField()
-    search_query = serializers.CharField()
-    search_language = serializers.CharField()
-    search_fields = serializers.ListField(child=serializers.CharField())

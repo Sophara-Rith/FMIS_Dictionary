@@ -3,8 +3,6 @@ import time
 import logging
 from functools import wraps, reduce
 import operator
-import traceback
-import uuid
 import hashlib
 import pandas as pd
 import os
@@ -20,8 +18,8 @@ from django.utils import timezone
 from django.http import FileResponse
 from django.core.cache import cache
 from django.conf import settings
-from django.db.models import Q, Max
-from .models import Dictionary, Staging, Bookmark, WordType
+from django.db.models import Q, Max, Case, When, Value, IntegerField
+from .models import Dictionary, Staging, Bookmark, WordType, RelatedWord
 from .serializers import (
     DictionaryEntrySerializer,
     BookmarkSerializer,
@@ -31,6 +29,7 @@ from .serializers import (
 from debug_utils import debug_error
 from .tasks import process_staging_bulk_import
 from .utils import DictionaryTemplateGenerator
+from dictionary import models
 
 logger = logging.getLogger(__name__)
 
@@ -244,16 +243,78 @@ class StagingEntryCreateView(APIView):
             data=request.data,
             context={'request': request}
         )
+
         if serializer.is_valid():
-            serializer.save()
+            # Save staging entry
+            staging_entry = serializer.save()
+
+            # Process related words
+            self._process_related_words(staging_entry)
+
             return Response({
-                'message': 'Data successfully insert.'
-            },status=status.HTTP_201_CREATED
-            )
-        return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
-        )
+                'responseCode': status.HTTP_201_CREATED,
+                'message': 'Staging entry created successfully',
+                'data': serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        return Response({
+            'responseCode': status.HTTP_400_BAD_REQUEST,
+            'message': 'Invalid data',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    def _process_related_words(self, staging_entry):
+        # Process Khmer words
+        kh_words = staging_entry.word_kh.split()
+        self._find_and_link_related_words(kh_words, staging_entry, 'word_kh')
+
+        # Process English words
+        en_words = staging_entry.word_en.split()
+        self._find_and_link_related_words(en_words, staging_entry, 'word_en')
+
+    def _find_and_link_related_words(self, words, staging_entry, word_field):
+        # Single word scenario
+        if len(words) == 1:
+            # Check if word already exists in dictionary
+            existing_word = Dictionary.objects.filter(**{word_field: words[0]}).first()
+            if not existing_word:
+                # If single word and not in dictionary, mark as potential parent
+                staging_entry.is_parent = True
+                staging_entry.is_child = False
+                staging_entry.save()
+            return
+
+        # Multiple word scenario
+        parent_words = []
+        full_phrase = ' '.join(words)
+
+        # Check each word if it exists in dictionary
+        for word in words:
+            existing_word = Dictionary.objects.filter(**{word_field: word}).first()
+            if existing_word and existing_word.is_parent:
+                # If word exists and is a parent, add to potential parents
+                parent_words.append(existing_word)
+
+        # If we have parent words, mark the full phrase as a child
+        if parent_words:
+            staging_entry.is_parent = False
+            staging_entry.is_child = True
+            staging_entry.save()
+
+            # Create related word entries for each parent word
+            for parent_word in parent_words:
+                RelatedWord.objects.get_or_create(
+                    parent_word=parent_word,
+                    child_word=Dictionary.objects.filter(**{word_field: full_phrase}).first(),
+                    defaults={
+                        'relationship_type': 'COMPOUND'
+                    }
+                )
+
+    def _generate_unique_index(self):
+        # Generate a unique index
+        max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
+        return max_index + 1
 
 def generate_next_index():
     """
@@ -269,50 +330,85 @@ def generate_next_index():
         return Dictionary.objects.count() + 1
 
 class StagingEntryApproveView(APIView):
-    def post(self, request, staging_id):
+    def post(self, request, pk):
         try:
             # Retrieve the staging entry
-            staging_entry = Staging.objects.get(id=staging_id)
+            staging_entry = Staging.objects.get(id=pk)
 
             # Generate next index
-            next_index = generate_next_index()
+            next_index = self._generate_unique_index()
 
             # Create Dictionary entry
             dictionary_entry = Dictionary.objects.create(
-                index=next_index,  # Explicitly set the index
+                index=next_index,
                 word_kh=staging_entry.word_kh,
                 word_en=staging_entry.word_en,
                 word_kh_type=staging_entry.word_kh_type,
                 word_en_type=staging_entry.word_en_type,
                 word_kh_definition=staging_entry.word_kh_definition,
                 word_en_definition=staging_entry.word_en_definition,
-                pronunciation_kh=staging_entry.pronunciation_kh,
-                pronunciation_en=staging_entry.pronunciation_en,
-                example_sentence_kh=staging_entry.example_sentence_kh,
-                example_sentence_en=staging_entry.example_sentence_en,
-                created_by=request.user
+                created_by=request.user,
+
+                # Transfer parent-child status from staging
+                is_parent=staging_entry.is_parent,
+                is_child=staging_entry.is_child
             )
+
+            # Process related words if it's a multi-word entry
+            if staging_entry.is_child:
+                self._process_related_words(dictionary_entry, staging_entry)
 
             # Update staging entry status
             staging_entry.review_status = 'APPROVED'
-            staging_entry.reviewed_by = request.user
-            staging_entry.reviewed_at = timezone.now()
             staging_entry.save()
 
             return Response({
-                'message': 'Entry approved successfully',
-                'index': next_index
-            }, status=status.HTTP_201_CREATED)
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Staging entry approved successfully',
+                'data': {
+                    'id': dictionary_entry.id,
+                    'is_parent': dictionary_entry.is_parent,
+                    'is_child': dictionary_entry.is_child
+                }
+            })
 
         except Staging.DoesNotExist:
             return Response({
-                'error': 'Staging entry not found'
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'Staging entry not found'
             }, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            logger.error(f"Approval error: {e}")
-            return Response({
-                'error': 'An unexpected error occurred during approval'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _process_related_words(self, new_word, staging_entry):
+        # Ensure mutually exclusive parent/child status
+        if staging_entry.is_parent:
+            new_word.is_parent = True
+            new_word.is_child = False
+        elif staging_entry.is_child:
+            new_word.is_parent = False
+            new_word.is_child = True
+
+        new_word.save()
+
+        # Find and link related words
+        words = staging_entry.word_en.split()
+        full_phrase = staging_entry.word_en
+
+        # Check for parent words
+        for word in words:
+            parent_word = Dictionary.objects.filter(word_en=word, is_parent=True).first()
+            if parent_word:
+                # Create RelatedWord entry
+                RelatedWord.objects.get_or_create(
+                    parent_word=parent_word,
+                    child_word=new_word,
+                    defaults={
+                        'relationship_type': 'COMPOUND'
+                    }
+                )
+
+    def _generate_unique_index(self):
+        max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
+        return max_index + 1
 
 class StagingEntryRejectView(APIView):
     permission_classes = [IsAdminUser]
@@ -593,48 +689,7 @@ class DictionarySearchView(APIView):
         return reduce(operator.or_, search_conditions) if search_conditions else Q()
 
     @swagger_auto_schema(
-        operation_description="""
-        Comprehensive Dictionary Search Endpoint
-
-        This endpoint allows flexible searching across the dictionary with multiple parameters:
-
-        Search Capabilities:
-        - Search in Khmer and English words
-        - Multiple search fields (words, definitions, example sentences)
-        - Language direction filtering
-        - Pagination support
-
-        Language Options:
-        - kh: Search Khmer to English
-        - en: Search English to Khmer
-        - ALL: Search across both languages (default)
-
-        Search Fields:
-        - 'word': Search in word fields
-        - 'definition': Search in definition fields
-        - 'example_sentence': Search in example sentence fields
-
-        Recommended Use Cases:
-        1. Basic word lookup
-        ```
-        GET /api/dictionary/search/?query=hello
-        ```
-        2. Multilingual search
-        ```
-        GET /api/dictionary/search/?query=សួស្ដី&language=kh&search_fields=word
-        ```
-        ```
-        GET /api/dictionary/search/?query=hello&language=en&search_fields=word
-        ```
-        3. Comprehensive content search
-        ```
-        GET /api/dictionary/search/?query=eat&page=2&per_page=20
-        ```
-        4. Complex search
-        ```
-        GET /api/dictionary/search/?query=travel&language=ALL&search_fields=definition&search_fields=example_sentence
-        ```
-        """,
+        operation_description="Comprehensive Dictionary Search Endpoint",
         manual_parameters=[
             openapi.Parameter(
                 name='query',
@@ -683,66 +738,38 @@ class DictionarySearchView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'results': openapi.Schema(
-                            type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(
-                                type=openapi.TYPE_OBJECT,
-                                properties={
-                                    'id': openapi.Schema(
-                                        type=openapi.TYPE_INTEGER,
-                                        description='Unique identifier for dictionary entry'
-                                    ),
-                                    'word_kh': openapi.Schema(
-                                        type=openapi.TYPE_STRING,
-                                        description='Khmer word'
-                                    ),
-                                    'word_en': openapi.Schema(
-                                        type=openapi.TYPE_STRING,
-                                        description='English word'
-                                    ),
-                                    'word_kh_type': openapi.Schema(
-                                        type=openapi.TYPE_STRING,
-                                        description='Khmer word type (noun, verb, etc.)'
-                                    ),
-                                    'word_en_type': openapi.Schema(
-                                        type=openapi.TYPE_STRING,
-                                        description='English word type (noun, verb, etc.)'
-                                    ),
-                                    'word_kh_definition': openapi.Schema(
-                                        type=openapi.TYPE_STRING,
-                                        description='Definition of the word in Khmer'
-                                    ),
-                                    'word_en_definition': openapi.Schema(
-                                        type=openapi.TYPE_STRING,
-                                        description='Definition of the word in English'
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'results': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
+                                        }
                                     )
-                                }
-                            )
-                        ),
-                        'total_results': openapi.Schema(
-                            type=openapi.TYPE_INTEGER,
-                            description='Total number of search results'
-                        ),
-                        'page': openapi.Schema(
-                            type=openapi.TYPE_INTEGER,
-                            description='Current page number'
-                        ),
-                        'total_pages': openapi.Schema(
-                            type=openapi.TYPE_INTEGER,
-                            description='Total number of pages'
-                        ),
-                        'search_query': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Original search query'
-                        ),
-                        'search_language': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Language direction used for search'
-                        ),
-                        'search_fields': openapi.Schema(
-                            type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(type=openapi.TYPE_STRING),
-                            description='Fields used in the search'
+                                ),
+                                'total_results': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'search_query': openapi.Schema(type=openapi.TYPE_STRING),
+                                'search_language': openapi.Schema(type=openapi.TYPE_STRING),
+                                'search_fields': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(type=openapi.TYPE_STRING)
+                                )
+                            }
                         )
                     }
                 )
@@ -752,10 +779,9 @@ class DictionarySearchView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'error': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Error message explaining the bad request'
-                        )
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
                     }
                 )
             )
@@ -764,57 +790,85 @@ class DictionarySearchView(APIView):
     @debug_error
     @track_search_performance
     def get(self, request):
-        # Extract parameters
-        query = request.query_params.get('query', '').strip()
-        language = request.query_params.get('language', 'ALL')
-        search_fields = request.query_params.getlist('search_fields') or self.DEFAULT_SEARCH_FIELDS
-        page = int(request.query_params.get('page', 1))
-        per_page = int(request.query_params.get('per_page', 10))
+        try:
+            # Extract parameters
+            query = request.query_params.get('query', '').strip()
+            language = request.query_params.get('language', 'ALL')
+            search_fields = request.query_params.getlist('search_fields') or self.DEFAULT_SEARCH_FIELDS
+            page = max(1, int(request.query_params.get('page', 1)))
+            per_page = max(1, int(request.query_params.get('per_page', 10)))
 
-        # Validate input
-        if not query:
+            # Validate input
+            if not query:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Search query is required',
+                    'data': {}
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Generate cache key
+            cache_key = self.get_cache_key(query, language, search_fields)
+
+            # Check cache
+            cached_results = cache.get(cache_key)
+            if cached_results:
+                return Response(cached_results)
+
+            # Build search query
+            search_query = self.build_search_query(query, search_fields, language)
+
+            # Perform search
+            entries = Dictionary.objects.filter(search_query)
+
+            # Pagination
+            total_results = entries.count()
+            total_pages = (total_results + per_page - 1) // per_page
+
+            # Apply pagination
+            start = (page - 1) * per_page
+            end = start + per_page
+            paginated_entries = entries[start:end]
+
+            # Prepare response
+            response_data = {
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Dictionary search completed successfully',
+                'data': {
+                    'results': [
+                        {
+                            'id': entry.id,
+                            'word_kh': entry.word_kh,
+                            'word_en': entry.word_en,
+                            'word_kh_type': entry.word_kh_type,
+                            'word_en_type': entry.word_en_type,
+                            'word_kh_definition': entry.word_kh_definition,
+                            'word_en_definition': entry.word_en_definition,
+                            # 'example_sentence_kh': entry.example_sentence_kh or '',
+                            # 'example_sentence_en': entry.example_sentence_en or ''
+                        }
+                        for entry in paginated_entries
+                    ],
+                    'total_results': total_results,
+                    'page': page,
+                    'total_pages': total_pages,
+                    'search_query': query,
+                    'search_language': language,
+                    'search_fields': search_fields
+                }
+            }
+
+            # Cache the response
+            cache.set(cache_key, response_data, timeout=3600)  # Cache for 1 hour
+
+            return Response(response_data)
+
+        except Exception as e:
+            logger.error(f"Search Error: {str(e)}")
             return Response({
-                'error': 'Search query is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Generate cache key
-        cache_key = self.get_cache_key(query, language, search_fields)
-
-        # Check cache
-        cached_results = cache.get(cache_key)
-        if cached_results:
-            return Response(cached_results)
-
-        # Build search query
-        search_query = self.build_search_query(query, search_fields, language)
-
-        # Perform search
-        entries = Dictionary.objects.filter(search_query)
-
-        # Pagination
-        total_results = entries.count()
-        total_pages = (total_results + per_page - 1) // per_page
-
-        # Apply pagination
-        start = (page - 1) * per_page
-        end = start + per_page
-        paginated_entries = entries[start:end]
-
-        # Prepare response
-        response_data = {
-            'results': DictionaryEntrySerializer(paginated_entries, many=True).data,
-            'total_results': total_results,
-            'page': page,
-            'total_pages': total_pages,
-            'search_query': query,
-            'search_language': language,
-            'search_fields': search_fields
-        }
-
-        # Cache results
-        cache.set(cache_key, response_data, timeout=3600)
-
-        return Response(response_data)
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Internal server error during search',
+                'data': {}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class StagingBulkImportView(APIView):
     parser_classes = (MultiPartParser, FormParser)
@@ -1144,25 +1198,23 @@ class BookmarkView(APIView):
                         'data': openapi.Schema(
                             type=openapi.TYPE_OBJECT,
                             properties={
-                                'bookmarks': openapi.Schema(
+                                'entries': openapi.Schema(
                                     type=openapi.TYPE_ARRAY,
                                     items=openapi.Schema(
                                         type=openapi.TYPE_OBJECT,
                                         properties={
                                             'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                            'word_details': openapi.Schema(
-                                                type=openapi.TYPE_OBJECT,
-                                                properties={
-                                                    'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                                    'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                                    'definition_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                                    'definition_en': openapi.Schema(type=openapi.TYPE_STRING)
-                                                }
-                                            )
+                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'created_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time')
                                         }
                                     )
                                 ),
-                                'total_bookmarks': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
                                 'page': openapi.Schema(type=openapi.TYPE_INTEGER),
                                 'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
                                 'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
@@ -1170,16 +1222,13 @@ class BookmarkView(APIView):
                         )
                     }
                 )
-            ),
-            400: 'Bad Request - Missing Device ID',
-            401: 'Unauthorized',
-            500: 'Internal Server Error'
+            )
         }
     )
     def get(self, request):
         try:
-            # Get device ID from request headers or parameters
-            device_id = request.headers.get('X-Device-ID') or request.query_params.get('device_id')
+            # Get device ID from request headers
+            device_id = request.headers.get('X-Device-ID')
 
             if not device_id:
                 return Response({
@@ -1188,32 +1237,46 @@ class BookmarkView(APIView):
                     'data': []
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Pagination parameters
-            page = int(request.query_params.get('page', 1))
-            per_page = int(request.query_params.get('per_page', 25))
+            # Safely get pagination parameters
+            page = max(1, int(request.GET.get('page', 1)))
+            per_page = max(1, int(request.GET.get('per_page', 25)))
 
-            # Calculate pagination
-            start = (page - 1) * per_page
-            end = start + per_page
-
-            # Filter bookmarks by device ID
+            # Get bookmarks for the specific device
             bookmarks = Bookmark.objects.filter(device_id=device_id)
 
-            # Paginate bookmarks
+            # Calculate pagination
+            total_entries = bookmarks.count()
+            total_pages = (total_entries + per_page - 1) // per_page
+
+            # Apply pagination
+            start = (page - 1) * per_page
+            end = start + per_page
             paginated_bookmarks = bookmarks[start:end]
 
-            # Use existing BookmarkSerializer
-            serializer = BookmarkSerializer(paginated_bookmarks, many=True)
+            # Prepare entries with dictionary details
+            entries = []
+            for bookmark in paginated_bookmarks:
+                word = bookmark.word
+                entries.append({
+                    'id': word.id,
+                    'word_kh': word.word_kh,
+                    'word_en': word.word_en,
+                    'word_kh_type': word.word_kh_type,
+                    'word_en_type': word.word_en_type,
+                    'word_kh_definition': word.word_kh_definition,
+                    'word_en_definition': word.word_en_definition,
+                    'created_at': word.created_at.isoformat()
+                })
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Bookmarks retrieved successfully',
                 'data': {
-                    'bookmarks': serializer.data,
-                    'total_bookmarks': bookmarks.count(),
+                    'entries': entries,
+                    'total_entries': total_entries,
                     'page': page,
                     'per_page': per_page,
-                    'total_pages': (bookmarks.count() + per_page - 1) // per_page
+                    'total_pages': total_pages
                 }
             })
 
@@ -1619,63 +1682,56 @@ class DictionarySyncAllView(APIView):
             )
         }
     )
+    @debug_error
     def get(self, request):
         try:
-            # Get device ID from request headers
+            # Get device ID from headers
             device_id = request.headers.get('X-Device-ID')
 
+            # Validate device ID
             if not device_id:
                 return Response({
                     'responseCode': status.HTTP_400_BAD_REQUEST,
                     'message': 'Device ID is required',
-                    'data': []
+                    'data': None
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Safely get pagination parameters
+            # Pagination parameters
             page = max(1, int(request.GET.get('page', 1)))
-            per_page = max(1, int(request.GET.get('per_page', 25)))
+            per_page = max(1, int(request.GET.get('per_page', 20)))
 
             # Calculate pagination
+            # Prioritize parent words, then other entries
+            entries = Dictionary.objects.annotate(
+                parent_priority=Case(
+                    When(is_parent=True, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField()
+                )
+            ).order_by('parent_priority', 'id')[
+                (page-1)*per_page : page*per_page
+            ]
+
+            # Calculate total entries and pages
             total_entries = Dictionary.objects.count()
             total_pages = (total_entries + per_page - 1) // per_page
 
-            # Calculate start and end indices
-            start = (page - 1) * per_page
-            end = start + per_page
-
-            # Fetch entries with optimized queryset
-            entries = Dictionary.objects.order_by('id')[start:end]
-
-            # Get bookmarked word IDs for this device
-            bookmarked_word_ids = set(
-                Bookmark.objects.filter(device_id=device_id)
-                .values_list('word_id', flat=True)
+            # Serialize entries with related words and bookmark status
+            serializer = DictionaryEntrySerializer(
+                entries,
+                many=True,
+                context={'request': request}
             )
 
-            # Prepare last and current sync timestamps
-            last_sync_timestamp = (timezone.now() - timezone.timedelta(minutes=2)).isoformat()
-            current_sync_timestamp = timezone.now().isoformat()
-
-            # Prepare response data matching the exact structure
+            # Prepare response
             response_data = {
-                'entries': [
-                    {
-                        'id': entry.id,
-                        'word_kh': entry.word_kh,
-                        'word_en': entry.word_en,
-                        'word_kh_type': entry.word_kh_type,
-                        'word_en_type': entry.word_en_type,
-                        'word_kh_definition': entry.word_kh_definition,
-                        'word_en_definition': entry.word_en_definition,
-                        'is_bookmark': 1 if entry.id in bookmarked_word_ids else 0
-                    } for entry in entries
-                ],
+                'entries': serializer.data,
                 'total_entries': total_entries,
                 'page': page,
                 'per_page': per_page,
                 'total_pages': total_pages,
-                'last_sync_timestamp': last_sync_timestamp,
-                'current_sync_timestamp': current_sync_timestamp
+                'last_sync_timestamp': (timezone.now() - timezone.timedelta(minutes=2)).isoformat(),
+                'current_sync_timestamp': timezone.now().isoformat()
             }
 
             return Response({
@@ -1685,7 +1741,10 @@ class DictionarySyncAllView(APIView):
             })
 
         except Exception as e:
-            logger.error(f"Sync All Error: {str(e)}")
+            # Detailed error logging
+            import traceback
+            print(traceback.format_exc())
+
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
                 'message': 'Internal server error',
