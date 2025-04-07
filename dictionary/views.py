@@ -1171,20 +1171,6 @@ class BookmarkView(APIView):
                 type=openapi.TYPE_STRING,
                 description='Unique Device Identifier',
                 required=True
-            ),
-            openapi.Parameter(
-                'page',
-                openapi.IN_QUERY,
-                type=openapi.TYPE_INTEGER,
-                description='Page number for pagination',
-                default=1
-            ),
-            openapi.Parameter(
-                'per_page',
-                openapi.IN_QUERY,
-                type=openapi.TYPE_INTEGER,
-                description='Number of items per page',
-                default=25
             )
         ],
         responses={
@@ -1206,18 +1192,15 @@ class BookmarkView(APIView):
                                             'id': openapi.Schema(type=openapi.TYPE_INTEGER),
                                             'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
                                             'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'created_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time')
+                                            # 'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            # 'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            # 'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            # 'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            # 'created_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time')
                                         }
                                     )
                                 ),
-                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
+                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER)
                             }
                         )
                     }
@@ -1237,35 +1220,22 @@ class BookmarkView(APIView):
                     'data': []
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Safely get pagination parameters
-            page = max(1, int(request.GET.get('page', 1)))
-            per_page = max(1, int(request.GET.get('per_page', 25)))
-
             # Get bookmarks for the specific device
             bookmarks = Bookmark.objects.filter(device_id=device_id)
 
-            # Calculate pagination
-            total_entries = bookmarks.count()
-            total_pages = (total_entries + per_page - 1) // per_page
-
-            # Apply pagination
-            start = (page - 1) * per_page
-            end = start + per_page
-            paginated_bookmarks = bookmarks[start:end]
-
             # Prepare entries with dictionary details
             entries = []
-            for bookmark in paginated_bookmarks:
+            for bookmark in bookmarks:
                 word = bookmark.word
                 entries.append({
                     'id': word.id,
                     'word_kh': word.word_kh,
                     'word_en': word.word_en,
-                    'word_kh_type': word.word_kh_type,
-                    'word_en_type': word.word_en_type,
-                    'word_kh_definition': word.word_kh_definition,
-                    'word_en_definition': word.word_en_definition,
-                    'created_at': word.created_at.isoformat()
+                    # 'word_kh_type': word.word_kh_type,
+                    # 'word_en_type': word.word_en_type,
+                    # 'word_kh_definition': word.word_kh_definition,
+                    # 'word_en_definition': word.word_en_definition,
+                    # 'created_at': bookmark.created_at.isoformat()
                 })
 
             return Response({
@@ -1273,10 +1243,7 @@ class BookmarkView(APIView):
                 'message': 'Bookmarks retrieved successfully',
                 'data': {
                     'entries': entries,
-                    'total_entries': total_entries,
-                    'page': page,
-                    'per_page': per_page,
-                    'total_pages': total_pages
+                    'total_entries': len(entries)
                 }
             })
 
@@ -1288,7 +1255,7 @@ class BookmarkView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @swagger_auto_schema(
-        operation_description="Create a Bookmark",
+        operation_description="Manage Bookmarks",
         tags=['mobile'],
         manual_parameters=[
             openapi.Parameter(
@@ -1301,17 +1268,22 @@ class BookmarkView(APIView):
         ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['word_id'],
+            required=['word_id', 'is_bookmark'],
             properties={
                 'word_id': openapi.Schema(
                     type=openapi.TYPE_INTEGER,
-                    description="ID of the word to bookmark"
+                    description="ID of the word to bookmark/unbookmark"
+                ),
+                'is_bookmark': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description="Bookmark status (1 to add, 0 to remove)",
+                    enum=[0, 1]
                 )
             }
         ),
         responses={
-            201: openapi.Response(
-                description='Bookmark Created Successfully',
+            200: openapi.Response(
+                description='Bookmark Operation Successful',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
@@ -1320,14 +1292,13 @@ class BookmarkView(APIView):
                         'data': openapi.Schema(
                             type=openapi.TYPE_OBJECT,
                             properties={
-                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
                                 'word_details': openapi.Schema(
                                     type=openapi.TYPE_OBJECT,
                                     properties={
+                                        'word_id': openapi.Schema(type=openapi.TYPE_INTEGER),
                                         'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
                                         'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'definition_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'definition_en': openapi.Schema(type=openapi.TYPE_STRING)
+                                        'is_bookmark': openapi.Schema(type=openapi.TYPE_INTEGER)
                                     }
                                 )
                             }
@@ -1352,17 +1323,19 @@ class BookmarkView(APIView):
                     'data': []
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Get word_id from request data
+            # Get word_id and is_bookmark from request data
             word_id = request.data.get('word_id')
+            is_bookmark = request.data.get('is_bookmark')
 
-            if not word_id:
+            # Validate input parameters
+            if word_id is None or is_bookmark is None:
                 return Response({
                     'responseCode': status.HTTP_400_BAD_REQUEST,
-                    'message': 'Word ID is required',
+                    'message': 'Word ID and is_bookmark are required',
                     'data': []
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Check if word exists
+            # Validate word_id exists
             try:
                 word = Dictionary.objects.get(id=word_id)
             except Dictionary.DoesNotExist:
@@ -1372,25 +1345,47 @@ class BookmarkView(APIView):
                     'data': []
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            # Create or get bookmark
-            bookmark, created = Bookmark.objects.get_or_create(
-                device_id=device_id,
-                word=word
-            )
+            # Handle bookmark logic
+            if is_bookmark == 1:
+                # Create bookmark if it doesn't exist
+                bookmark, created = Bookmark.objects.get_or_create(
+                    device_id=device_id,
+                    word=word
+                )
+                message = 'Bookmark added successfully'
+            elif is_bookmark == 0:
+                # Remove bookmark if it exists
+                try:
+                    bookmark = Bookmark.objects.get(
+                        device_id=device_id,
+                        word=word
+                    )
+                    bookmark.delete()
+                    message = 'Bookmark removed successfully'
+                except Bookmark.DoesNotExist:
+                    # If trying to remove a non-existent bookmark, return success
+                    message = 'Bookmark not found'
 
-            # Use existing BookmarkSerializer to get word details
-            serializer = BookmarkSerializer(bookmark)
+            # Prepare response data
+            response_data = {
+                'word_details': {
+                    'word_id': word.id,
+                    'word_kh': word.word_kh,
+                    'word_en': word.word_en,
+                    'is_bookmark': is_bookmark
+                }
+            }
 
             return Response({
-                'responseCode': status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-                'message': 'Bookmark added successfully' if created else 'Bookmark already exists',
-                'data': serializer.data
-            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+                'responseCode': status.HTTP_200_OK,
+                'message': message,
+                'data': response_data
+            })
 
         except Exception as e:
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': 'Failed to add bookmark',
+                'message': 'Failed to process bookmark',
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1507,8 +1502,15 @@ class DictionarySyncView(APIView):
 
     @swagger_auto_schema(
         operation_description="Sync dictionary entries since last synchronization",
-        tags=['mobile'],
+        tags=['mobile', 'dictionary'],
         manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique Device Identifier',
+                required=True
+            ),
             openapi.Parameter(
                 'last_sync_timestamp',
                 openapi.IN_QUERY,
@@ -1523,8 +1525,16 @@ class DictionarySyncView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=200
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Sync status message',
+                            example='Dictionary entries retrieved successfully'
+                        ),
                         'data': openapi.Schema(
                             type=openapi.TYPE_OBJECT,
                             properties={
@@ -1540,14 +1550,50 @@ class DictionarySyncView(APIView):
                                             'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
                                             'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
                                             'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'sync_status': openapi.Schema(type=openapi.TYPE_STRING)
+                                            'is_bookmark': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'is_parent': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                                            'word_related': openapi.Schema(
+                                                type=['array', 'object'],
+                                                description='Related words or message if no related words'
+                                            )
                                         }
                                     )
                                 ),
                                 'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'last_sync_timestamp': openapi.Schema(type=openapi.TYPE_STRING),
-                                'current_sync_timestamp': openapi.Schema(type=openapi.TYPE_STRING)
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'last_sync_timestamp': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    format='date-time'
+                                ),
+                                'current_sync_timestamp': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    format='date-time'
+                                )
                             }
+                        )
+                    }
+                )
+            ),
+            400: openapi.Response(
+                description='Bad Request - Invalid Parameters',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=400
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Error message',
+                            example='Invalid synchronization parameters'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            nullable=True
                         )
                     }
                 )
@@ -1555,30 +1601,43 @@ class DictionarySyncView(APIView):
         }
     )
     def get(self, request):
+
+        device_id = request.headers.get('X-Device-ID')
+
+        if not device_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Device ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        last_sync_timestamp = request.query_params.get('last_sync_timestamp')
+
+        if not last_sync_timestamp:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'last_sync_timestamp is required',
+                'data': {}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            # Extract last sync timestamp (required parameter)
-            last_sync_timestamp = request.query_params.get('last_sync_timestamp')
+            from dateutil import parser
+            last_sync = parser.isoparse(last_sync_timestamp)
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': f'Invalid last_sync_timestamp format. Error: {str(e)}',
+                'data': {}
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Validate timestamp format
-            try:
-                last_sync = timezone.datetime.fromisoformat(last_sync_timestamp)
-            except (ValueError, TypeError):
-                return Response({
-                    'responseCode': status.HTTP_400_BAD_REQUEST,
-                    'message': 'Invalid last_sync_timestamp format. Use ISO format.',
-                    'data': {}
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Query for new and updated entries since last sync
+        try:
             updated_entries = Dictionary.objects.filter(
                 Q(created_at__gt=last_sync) |  # New entries
                 Q(updated_at__gt=last_sync)    # Updated existing entries
             )
 
-            # Prepare current sync timestamp
             current_sync_timestamp = timezone.now().isoformat()
 
-            # Prepare sync data
             sync_data = {
                 'entries': [{
                     'id': entry.id,
@@ -1588,9 +1647,14 @@ class DictionarySyncView(APIView):
                     'word_en_type': entry.word_en_type,
                     'word_kh_definition': entry.word_kh_definition,
                     'word_en_definition': entry.word_en_definition,
-                    'sync_status': self._get_sync_status(entry, last_sync)
+                    'is_bookmark': 0,
+                    'is_parent': getattr(entry, 'is_parent', False),
+                    'word_related': self._get_related_words(entry)
                 } for entry in updated_entries],
                 'total_entries': updated_entries.count(),
+                'page': 1,
+                'per_page': updated_entries.count(),
+                'total_pages': 1,
                 'last_sync_timestamp': last_sync_timestamp,
                 'current_sync_timestamp': current_sync_timestamp
             }
@@ -1609,21 +1673,32 @@ class DictionarySyncView(APIView):
                 'data': {}
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def _get_sync_status(self, entry, last_sync):
+    def _get_related_words(self, entry):
         """
-        Determine sync status of an entry
+        Retrieve related words for a dictionary entry
         """
-        if entry.created_at > last_sync:
-            return 'NEW'
-        elif entry.updated_at > last_sync:
-            return 'UPDATED'
-        return 'UNCHANGED'
+        related_words = entry.related_words.all() if hasattr(entry, 'related_words') else []
+
+        if not related_words:
+            return {"message": "There is no related word."}
+
+        return [{
+            'id': word.id,
+            'word_kh': word.word_kh,
+            'word_en': word.word_en,
+            # 'word_kh_type': word.word_kh_type,
+            # 'word_en_type': word.word_en_type,
+            # 'word_kh_definition': word.word_kh_definition,
+            # 'word_en_definition': word.word_en_definition,
+            # 'is_bookmark': 0,
+            # 'is_child': True
+        } for word in related_words]
 
 class DictionarySyncAllView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Full Dictionary Synchronization",
+        operation_description="Full Dictionary Synchronization for Mobile App",
         tags=['mobile'],
         manual_parameters=[
             openapi.Parameter(
@@ -1653,29 +1728,98 @@ class DictionarySyncAllView(APIView):
                 description='Full Dictionary Sync Successful',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
+                                    properties={
+                    'responseCode': openapi.Schema(
+                        type=openapi.TYPE_INTEGER,
+                        description='HTTP status code',
+                        example=200
+                    ),
+                    'message': openapi.Schema(
+                        type=openapi.TYPE_STRING,
+                        description='Sync status message',
+                        example='Full dictionary synced successfully'
+                    ),
+                    'data': openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'entries': openapi.Schema(
+                                type=openapi.TYPE_ARRAY,
+                                items=openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'is_bookmark': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                        'is_parent': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                                        'word_related': openapi.Schema(
+                                            type=['array', 'object'],
+                                            description='Related words or message if no related words'
+                                        )
+                                    }
+                                )
+                            ),
+                            'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'last_sync_timestamp': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                format='date-time'
+                            ),
+                            'current_sync_timestamp': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                format='date-time'
+                            )
+                        }
+                    )
+                }
+                )
+            ),
+            400: openapi.Response(
+                description='Bad Request - Invalid Parameters',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
                     properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=400
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Error message',
+                            example='Invalid synchronization parameters'
+                        ),
                         'data': openapi.Schema(
                             type=openapi.TYPE_OBJECT,
-                            properties={
-                                'entries': openapi.Schema(
-                                    type=openapi.TYPE_ARRAY,
-                                    items=openapi.Schema(
-                                        type=openapi.TYPE_OBJECT,
-                                        properties={
-                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'is_bookmark': openapi.Schema(type=openapi.TYPE_INTEGER)
-                                        }
-                                    )
-                                )
-                            }
+                            nullable=True
+                        )
+                    }
+                )
+            ),
+            401: openapi.Response(
+                description='Unauthorized - Authentication Required',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=401
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Authentication error message',
+                            example='Authentication credentials were not provided or are invalid'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            nullable=True
                         )
                     }
                 )

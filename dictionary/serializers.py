@@ -191,12 +191,12 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
                         'id': rw.id,
                         'word_kh': rw.word_kh,
                         'word_en': rw.word_en,
-                        'word_kh_type': rw.word_kh_type,
-                        'word_en_type': rw.word_en_type,
-                        'word_kh_definition': rw.word_kh_definition,
-                        'word_en_definition': rw.word_en_definition,
-                        'is_bookmark': 0,
-                        'is_child': True
+                        # 'word_kh_type': rw.word_kh_type,
+                        # 'word_en_type': rw.word_en_type,
+                        # 'word_kh_definition': rw.word_kh_definition,
+                        # 'word_en_definition': rw.word_en_definition,
+                        # 'is_bookmark': 0,
+                        # 'is_child': True
                     } for rw in related_words
                 ]
 
