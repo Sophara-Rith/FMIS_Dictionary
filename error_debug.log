@@ -497,3 +497,224 @@ TypeError: StagingEntryApproveView.post() got an unexpected keyword argument 'pk
 [2025-04-06 01:58:16,786] ERROR basehttp 19216 11832 - "POST /api/dictionary/staging/7/approve/ HTTP/1.1" 500 103763
 [2025-04-06 02:53:59,157] ERROR log 1596 9736 - Internal Server Error: /api/dictionary/bookmarks/
 [2025-04-06 02:53:59,158] ERROR basehttp 1596 9736 - "POST /api/dictionary/bookmarks/ HTTP/1.1" 500 186
+[2025-04-08 02:26:40,136] ERROR log 11884 7480 - Internal Server Error: /swagger/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\views.py", line 112, in get
+    schema = generator.get_schema(request, self.public)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 276, in get_schema
+    paths, prefix = self.get_paths(endpoints, components, request, public)
+                    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 482, in get_paths
+    operation = self.get_operation(view, path, prefix, method, components, request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 524, in get_operation
+    operation = view_inspector.get_operation(operation_keys)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\inspectors\view.py", line 32, in get_operation
+    body = self.get_request_body_parameters(consumes)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\inspectors\view.py", line 81, in get_request_body_parameters
+    raise SwaggerGenerationError("form request body cannot be a Schema")
+drf_yasg.errors.SwaggerGenerationError: form request body cannot be a Schema
+[2025-04-08 02:26:40,142] ERROR basehttp 11884 7480 - "GET /swagger/?format=openapi HTTP/1.1" 500 163662
+[2025-04-08 02:29:40,811] ERROR log 14132 10556 - Internal Server Error: /swagger/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\views.py", line 112, in get
+    schema = generator.get_schema(request, self.public)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 276, in get_schema
+    paths, prefix = self.get_paths(endpoints, components, request, public)
+                    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 482, in get_paths
+    operation = self.get_operation(view, path, prefix, method, components, request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 524, in get_operation
+    operation = view_inspector.get_operation(operation_keys)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\inspectors\view.py", line 32, in get_operation
+    body = self.get_request_body_parameters(consumes)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\inspectors\view.py", line 81, in get_request_body_parameters
+    raise SwaggerGenerationError("form request body cannot be a Schema")
+drf_yasg.errors.SwaggerGenerationError: form request body cannot be a Schema
+[2025-04-08 02:29:40,820] ERROR basehttp 14132 10556 - "GET /swagger/?format=openapi HTTP/1.1" 500 164595
+[2025-04-08 02:33:55,039] ERROR log 9128 2644 - Internal Server Error: /swagger/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\views.py", line 112, in get
+    schema = generator.get_schema(request, self.public)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 276, in get_schema
+    paths, prefix = self.get_paths(endpoints, components, request, public)
+                    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 482, in get_paths
+    operation = self.get_operation(view, path, prefix, method, components, request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 524, in get_operation
+    operation = view_inspector.get_operation(operation_keys)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\inspectors\view.py", line 32, in get_operation
+    body = self.get_request_body_parameters(consumes)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\inspectors\view.py", line 81, in get_request_body_parameters
+    raise SwaggerGenerationError("form request body cannot be a Schema")
+drf_yasg.errors.SwaggerGenerationError: form request body cannot be a Schema
+[2025-04-08 02:33:55,045] ERROR basehttp 9128 2644 - "GET /swagger/?format=openapi HTTP/1.1" 500 164595
+[2025-04-08 02:42:10,156] ERROR log 1760 14564 - Internal Server Error: /swagger/
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\views\generic\base.py", line 104, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 509, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 469, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 480, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\rest_framework\views.py", line 506, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\views.py", line 112, in get
+    schema = generator.get_schema(request, self.public)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 276, in get_schema
+    paths, prefix = self.get_paths(endpoints, components, request, public)
+                    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 482, in get_paths
+    operation = self.get_operation(view, path, prefix, method, components, request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\generators.py", line 524, in get_operation
+    operation = view_inspector.get_operation(operation_keys)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\inspectors\view.py", line 32, in get_operation
+    body = self.get_request_body_parameters(consumes)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\drf_yasg\inspectors\view.py", line 81, in get_request_body_parameters
+    raise SwaggerGenerationError("form request body cannot be a Schema")
+drf_yasg.errors.SwaggerGenerationError: form request body cannot be a Schema
+[2025-04-08 02:42:10,166] ERROR basehttp 1760 14564 - "GET /swagger/?format=openapi HTTP/1.1" 500 164595
+[2025-04-08 02:53:27,634] ERROR log 18480 11500 - Internal Server Error: /api/users/register/
+[2025-04-08 02:53:27,635] ERROR basehttp 18480 11500 - "POST /api/users/register/ HTTP/1.1" 500 117
+[2025-04-08 03:04:01,484] ERROR log 18480 2636 - Internal Server Error: /api/users/register/
+[2025-04-08 03:04:01,485] ERROR basehttp 18480 2636 - "POST /api/users/register/ HTTP/1.1" 500 152
+[2025-04-08 03:11:31,746] ERROR log 15180 4412 - Internal Server Error: /api/users/register/
+[2025-04-08 03:11:31,747] ERROR basehttp 15180 4412 - "POST /api/users/register/ HTTP/1.1" 500 152
+[2025-04-08 03:11:33,400] ERROR log 15180 4412 - Internal Server Error: /api/users/register/
+[2025-04-08 03:11:33,400] ERROR basehttp 15180 4412 - "POST /api/users/register/ HTTP/1.1" 500 152
+[2025-04-08 03:12:29,275] ERROR log 3360 13344 - Internal Server Error: /api/users/register/
+[2025-04-08 03:12:29,275] ERROR basehttp 3360 13344 - "POST /api/users/register/ HTTP/1.1" 500 152
+[2025-04-08 03:12:30,521] ERROR log 3360 13344 - Internal Server Error: /api/users/register/
+[2025-04-08 03:12:30,522] ERROR basehttp 3360 13344 - "POST /api/users/register/ HTTP/1.1" 500 152
+[2025-04-08 03:12:31,295] ERROR log 3360 13344 - Internal Server Error: /api/users/register/
+[2025-04-08 03:12:31,295] ERROR basehttp 3360 13344 - "POST /api/users/register/ HTTP/1.1" 500 152
+[2025-04-08 03:14:57,651] ERROR log 18700 9984 - Internal Server Error: /api/users/register/
+[2025-04-08 03:14:57,652] ERROR basehttp 18700 9984 - "POST /api/users/register/ HTTP/1.1" 500 152
+[2025-04-08 03:14:59,457] ERROR log 18700 9984 - Internal Server Error: /api/users/register/
+[2025-04-08 03:14:59,458] ERROR basehttp 18700 9984 - "POST /api/users/register/ HTTP/1.1" 500 152
+[2025-04-08 03:16:05,010] ERROR log 8000 13868 - Internal Server Error: /api/users/register/
+[2025-04-08 03:16:05,012] ERROR basehttp 8000 13868 - "POST /api/users/register/ HTTP/1.1" 500 143
+[2025-04-08 03:25:16,589] ERROR log 17256 16888 - Internal Server Error: /api/users/register/
+[2025-04-08 03:25:16,590] ERROR basehttp 17256 16888 - "POST /api/users/register/ HTTP/1.1" 500 143
+[2025-04-08 03:25:19,124] ERROR log 17256 16888 - Internal Server Error: /api/users/register/
+[2025-04-08 03:25:19,125] ERROR basehttp 17256 16888 - "POST /api/users/register/ HTTP/1.1" 500 143
+[2025-04-08 03:25:20,080] ERROR log 17256 16888 - Internal Server Error: /api/users/register/
+[2025-04-08 03:25:20,081] ERROR basehttp 17256 16888 - "POST /api/users/register/ HTTP/1.1" 500 143
+[2025-04-08 04:27:50,348] ERROR log 19220 17300 - Internal Server Error: /api/dictionary/sync_all/
+[2025-04-08 04:27:50,349] ERROR basehttp 19220 17300 - "GET /api/dictionary/sync_all/?per_page=20 HTTP/1.1" 500 192
+[2025-04-08 04:29:31,821] ERROR log 14612 18764 - Internal Server Error: /api/dictionary/sync_all/
+[2025-04-08 04:29:31,822] ERROR basehttp 14612 18764 - "GET /api/dictionary/sync_all/?per_page=20 HTTP/1.1" 500 192
+[2025-04-08 04:30:37,587] ERROR log 10728 13132 - Internal Server Error: /api/dictionary/sync_all/
+[2025-04-08 04:30:37,588] ERROR basehttp 10728 13132 - "GET /api/dictionary/sync_all/?per_page=20 HTTP/1.1" 500 133
+[2025-04-08 04:31:11,612] ERROR log 3280 15668 - Internal Server Error: /api/dictionary/sync_all/
+[2025-04-08 04:31:11,613] ERROR basehttp 3280 15668 - "GET /api/dictionary/sync_all/?per_page=20 HTTP/1.1" 500 133
+[2025-04-08 04:34:57,050] ERROR log 13640 16304 - Internal Server Error: /api/dictionary/sync_all/
+[2025-04-08 04:34:57,051] ERROR basehttp 13640 16304 - "GET /api/dictionary/sync_all/?per_page=20 HTTP/1.1" 500 192
+[2025-04-08 04:35:30,896] ERROR log 3524 18212 - Internal Server Error: /api/dictionary/sync_all/
+[2025-04-08 04:35:30,896] ERROR basehttp 3524 18212 - "GET /api/dictionary/sync_all/?per_page=20 HTTP/1.1" 500 134
+[2025-04-08 04:38:18,320] ERROR log 12968 2184 - Internal Server Error: /api/dictionary/sync_all/
+[2025-04-08 04:38:18,321] ERROR basehttp 12968 2184 - "GET /api/dictionary/sync_all/?per_page=20 HTTP/1.1" 500 191
+[2025-04-08 08:12:52,806] ERROR log 17736 21176 - Internal Server Error: /api/users/register/
+[2025-04-08 08:12:52,806] ERROR basehttp 17736 21176 - "POST /api/users/register/ HTTP/1.1" 500 122
+[2025-04-09 08:47:41,111] ERROR log 10916 10008 - Internal Server Error: /api/users/login
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via POST, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining POST data. Change your form to point to 172.23.23.48:9991/api/users/login/ (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-09 08:47:41,113] ERROR basehttp 10916 10008 - "POST /api/users/login HTTP/1.1" 500 85072
+[2025-04-09 08:48:59,212] ERROR log 10916 19544 - Internal Server Error: /api/users/login
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via POST, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining POST data. Change your form to point to 172.23.23.48:9991/api/users/login/ (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-09 08:48:59,214] ERROR basehttp 10916 19544 - "POST /api/users/login HTTP/1.1" 500 85072
+[2025-04-09 09:43:54,616] ERROR views 6608 20592 - Sync error: name 'DictionaryEntrySyncSerializer' is not defined
+[2025-04-09 09:43:54,618] ERROR log 6608 20592 - Internal Server Error: /api/dictionary/sync/
+[2025-04-09 09:43:54,619] ERROR basehttp 6608 20592 - "GET /api/dictionary/sync/?last_sync_timestamp=2025-04-07T03%3A06%3A47.059983%2B00%3A00 HTTP/1.1" 500 83
+[2025-04-09 09:52:35,954] ERROR log 13444 21252 - Internal Server Error: /api/users/login/
+[2025-04-09 09:52:35,955] ERROR basehttp 13444 21252 - "POST /api/users/login/ HTTP/1.1" 500 86
+[2025-04-09 09:52:41,991] ERROR log 16932 5288 - Internal Server Error: /api/users/login/
+[2025-04-09 09:52:41,992] ERROR basehttp 16932 5288 - "POST /api/users/login/ HTTP/1.1" 500 86
+[2025-04-09 10:21:20,255] ERROR log 20772 7248 - Internal Server Error: /api/users/register/
+[2025-04-09 10:21:20,256] ERROR basehttp 20772 7248 - "POST /api/users/register/ HTTP/1.1" 500 122

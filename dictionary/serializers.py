@@ -158,7 +158,7 @@ class BookmarkSerializer(serializers.ModelSerializer):
 
 
 class DictionaryEntrySerializer(serializers.ModelSerializer):
-    word_related = serializers.SerializerMethodField()
+    word_related = serializers.SerializerMethodField() #change word_related to relateWords
     is_bookmark = serializers.SerializerMethodField()
 
     class Meta:
@@ -173,10 +173,10 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             'word_en_definition',
             'is_bookmark',
             'is_parent',
-            'word_related'
+            'word_related' #change word_related to relateWords
         ]
 
-    def get_word_related(self, obj):
+    def get_word_related(self, obj): #change word_related to relateWords
         # If is_parent is True, find related words
         if obj.is_parent:
             # Find words that contain the parent word
@@ -188,9 +188,9 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             if related_words.exists():
                 return [
                     {
-                        'id': rw.id,
-                        'word_kh': rw.word_kh,
-                        'word_en': rw.word_en,
+                        'related_id': rw.id,
+                        'related_word_kh': rw.word_kh,
+                        'related_word_en': rw.word_en,
                         # 'word_kh_type': rw.word_kh_type,
                         # 'word_en_type': rw.word_en_type,
                         # 'word_kh_definition': rw.word_kh_definition,
@@ -200,22 +200,19 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
                     } for rw in related_words
                 ]
 
-            return {"message": "There is no related word."}
+            return None
 
-        return {"message": "There is no related word."}
+        return None
 
     def get_is_bookmark(self, obj):
-        # Get request from context
         request = self.context.get('request')
         if not request:
             return 0
 
-        # Get device ID from headers
         device_id = request.headers.get('X-Device-ID')
         if not device_id:
             return 0
 
-        # Check if the word is bookmarked for this device
         from .models import Bookmark
         bookmark_exists = Bookmark.objects.filter(
             device_id=device_id,
@@ -225,7 +222,6 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
         return 1 if bookmark_exists else 0
 
     def validate(self, data):
-        # Ensure is_parent and is_child are mutually exclusive
         is_parent = data.get('is_parent', self.instance.is_parent if self.instance else False)
         is_child = data.get('is_child', self.instance.is_child if self.instance else False)
 

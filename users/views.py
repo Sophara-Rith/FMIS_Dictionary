@@ -11,8 +11,8 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
-from .models import MobileDevice, User
-from .serializers import UserSerializer
+from .models import MobileDevice, User, UserComment
+from .serializers import UserSerializer, UserCommentSerializer, UserCommentSubmitSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
@@ -51,7 +51,18 @@ class UserLoginView(APIView):
                             type=openapi.TYPE_OBJECT,
                             properties={
                                 'refresh': openapi.Schema(type=openapi.TYPE_STRING),
-                                'access': openapi.Schema(type=openapi.TYPE_STRING)
+                                'access': openapi.Schema(type=openapi.TYPE_STRING),
+                                'user': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'position': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
+                                    }
+                                )
                             }
                         )
                     }
@@ -90,7 +101,16 @@ class UserLoginView(APIView):
                     'message': 'Login successful',
                     'data': {
                         'refresh': str(refresh),
-                        'access': str(refresh.access_token)
+                        'access': str(refresh.access_token),
+                        'user': {
+                            'username': user.username,
+                            'username_kh': user.username_kh or '',
+                            'email': user.email,
+                            'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
+                            'position': user.position or '',
+                            'phone_number': convert_to_khmer_number(user.phone_number) if user.phone_number else '',
+                            'role': user.role or ''
+                        }
                     }
                 }, status=status.HTTP_200_OK)
             else:
@@ -108,11 +128,69 @@ class UserLoginView(APIView):
                 'data': None
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+def format_date(date_obj):
+    """
+    Convert datetime object to 'DD-MM-YYYY' format
+    """
+    if not date_obj:
+        return None
+    return date_obj.strftime('%d-%m-%Y')
+
+def convert_to_khmer_number(text):
+    """
+    Convert Latin numbers to Khmer numbers
+    """
+    latin_to_khmer = {
+        '0': '០',
+        '1': '១',
+        '2': '២',
+        '3': '៣',
+        '4': '៤',
+        '5': '៥',
+        '6': '៦',
+        '7': '៧',
+        '8': '៨',
+        '9': '៩'
+    }
+
+    # If input is None or not a string, return as is
+    if not isinstance(text, str):
+        return text
+
+    # Convert each Latin digit to Khmer
+    return ''.join(latin_to_khmer.get(char, char) for char in text)
+
 class UserListView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         operation_description="View list of all users",
+        manual_parameters=[
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number",
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of items per page",
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                'role',
+                openapi.IN_QUERY,
+                description="Filter by user role",
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                'is_active',
+                openapi.IN_QUERY,
+                description="Filter by active status",
+                type=openapi.TYPE_BOOLEAN
+            )
+        ],
         responses={
             200: openapi.Response(
                 description='Users retrieved successfully',
@@ -122,7 +200,29 @@ class UserListView(APIView):
                         'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
                         'message': openapi.Schema(type=openapi.TYPE_STRING),
                         'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'users': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'sex': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'position': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'phone_number': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'date_joined': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
+                                            'role': openapi.Schema(type=openapi.TYPE_STRING)
+                                        }
+                                    )
+                                ),
+                                'total_users': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
+                            }
                         )
                     }
                 )
@@ -158,7 +258,7 @@ class UserListView(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            # Pagination and filtering logic
+            # Support pagination and filtering
             page = int(request.query_params.get('page', 1))
             per_page = int(request.query_params.get('per_page', 25))
             role = request.query_params.get('role')
@@ -178,10 +278,15 @@ class UserListView(APIView):
             end = start + per_page
             paginated_users = users[start:end]
 
-            # Transform data
+            # Transform data to include specified fields
             user_data = [{
-                'username': user.username,
+                'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
+                'username_kh': user.username_kh or '',
+                'sex': user.sex or '',
+                'position': user.position or '',
                 'email': user.email,
+                'phone_number': convert_to_khmer_number(user.phone_number) if user.phone_number else '',
+                'date_joined': convert_to_khmer_number(format_date(user.date_joined)) if format_date(user.date_joined) else '',
                 'role': user.role
             } for user in paginated_users]
 
@@ -189,20 +294,20 @@ class UserListView(APIView):
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Data retrieved successfully',
                 'data': {
-                    'users': user_data
-                },
-                'total_users': users.count(),
-                'page': page,
-                'per_page': per_page,
-                'total_pages': (users.count() + per_page - 1) // per_page
+                    'users': user_data,
+                    'total_users': users.count(),
+                    'page': page,
+                    'per_page': per_page,
+                    'total_pages': (users.count() + per_page - 1) // per_page
+                }
             })
 
         except Exception as e:
             return Response({
-                'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Authentication failed',
-                'data': None
-            }, status=status.HTTP_401_UNAUTHORIZED)
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Data retrieval failed',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserDetailView(APIView):
     permission_classes = [IsAuthenticated]
@@ -310,7 +415,28 @@ class UserRegisterView(APIView):
                 'username': openapi.Schema(type=openapi.TYPE_STRING),
                 'email': openapi.Schema(type=openapi.TYPE_STRING),
                 'password': openapi.Schema(type=openapi.TYPE_STRING),
-                'role': openapi.Schema(type=openapi.TYPE_STRING)
+                'role': openapi.Schema(type=openapi.TYPE_STRING),
+                'sex': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    enum=['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY'],
+                    description='User\'s sex/gender'
+                ),
+                'username_kh': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Khmer Username'
+                ),
+                'staff_id': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Staff Identification Number'
+                ),
+                'position': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Job Position'
+                ),
+                'phone_number': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Phone number in format 0XXXXXXXXX'
+                ),
             }
         ),
         responses={
@@ -321,7 +447,18 @@ class UserRegisterView(APIView):
                     properties={
                         'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
                         'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                'role': openapi.Schema(type=openapi.TYPE_STRING),
+                                'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                'position': openapi.Schema(type=openapi.TYPE_STRING),
+                                'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
                     }
                 )
             ),
@@ -356,6 +493,17 @@ class UserRegisterView(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         try:
+            phone_number = request.data.get('phone_number')
+            if phone_number:
+                # Validate phone number format
+                cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
+                if not (cleaned_number.startswith('0') and len(cleaned_number) in [9, 10]):
+                    return Response({
+                        'responseCode': status.HTTP_400_BAD_REQUEST,
+                        'message': 'Invalid phone number format',
+                        'data': None
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
             serializer = UserSerializer(data=request.data)
 
             if serializer.is_valid():
@@ -366,7 +514,12 @@ class UserRegisterView(APIView):
                     'data': {
                         'username': user.username,
                         'email': user.email,
-                        'role': user.role
+                        'role': user.role,
+                        'sex': user.sex,
+                        'username_kh': user.username_kh,
+                        'staff_id': user.staff_id,
+                        'position': user.position,
+                        'phone_number': user.phone_number
                     }
                 }, status=status.HTTP_201_CREATED)
 
@@ -625,10 +778,16 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                                     type=openapi.TYPE_STRING,
                                     description='JWT Access Token'
                                 ),
-                                'login_method': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    description='Method used for login (username/email)',
-                                    example='email'
+                                'user': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'position': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
+                                    }
                                 )
                             }
                         )
@@ -687,16 +846,33 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             # Call parent method
             response = super().post(request, *args, **kwargs)
 
-            # Enhance response with login method
-            response_data = response.data.copy()
+            # Find the user for additional details
+            user = User.objects.get(username=login_input)
 
+            # Enhance response with login method and user details
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Token generated successfully',
                 'data': {
-                    **response_data
+                    'refresh': response.data.get('refresh'),
+                    'access': response.data.get('access'),
+                    'user': {
+                        'username': user.username,
+                        'username_kh': user.username_kh or '',
+                        'email': user.email,
+                        'staff_id': user.staff_id or '',
+                        'position': user.position or '',
+                        'phone_number': user.phone_number or ''
+                    }
                 }
             })
+
+        except User.DoesNotExist:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'User not found',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
 
         except Exception as e:
             # Log the exception for debugging
@@ -1137,5 +1313,177 @@ class PublicTestEndpoint(APIView):
             'data': {
                 'timestamp': datetime.now().isoformat(),
                 'version': 'v0.8'
+            }
+        })
+
+class UserCommentSubmitView(APIView):
+    """
+    Endpoint for mobile users to submit comments
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Submit User Comment from Mobile App",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                description="Unique device identifier",
+                type=openapi.TYPE_STRING,
+                required=True
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['detail'],
+            properties={
+                'detail': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="User's comment text",
+                    example="I found an issue with the app..."
+                )
+            }
+        ),
+        responses={
+            201: openapi.Response(
+                description='Comment Submitted Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'detail': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
+                    }
+                )
+            )
+        }
+    )
+    def post(self, request):
+        device_id = request.headers.get('X-Device-ID')
+
+        # Validate device_id
+        if not device_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Device ID is required in X-Device-ID header',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate comment detail
+        detail = request.data.get('detail', '').strip()
+        if not detail:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Comment detail cannot be empty',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Create comment
+            comment = UserComment.objects.create(
+                user=request.user,
+                detail=detail,
+                device_id=device_id
+            )
+
+            return Response({
+                'responseCode': status.HTTP_201_CREATED,
+                'message': 'Comment submitted successfully',
+                'data': {
+                    'id': comment.id,
+                    'detail': comment.detail
+                }
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Failed to submit comment',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UserCommentListView(APIView):
+    """
+    Endpoint for ADMIN and SUPERUSER to view all user comments
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve All User Comments (ADMIN/SUPERUSER only)",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'is_reviewed',
+                openapi.IN_QUERY,
+                description="Filter by review status",
+                type=openapi.TYPE_BOOLEAN
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Comments Retrieved Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'comments': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'comment_text': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'created_at': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'device_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'is_reviewed': openapi.Schema(type=openapi.TYPE_BOOLEAN)
+                                        }
+                                    )
+                                ),
+                                'total_comments': openapi.Schema(type=openapi.TYPE_INTEGER)
+                            }
+                        )
+                    }
+                )
+            )
+        }
+    )
+    def get(self, request):
+        # Check if user is ADMIN or SUPERUSER
+        if request.user.role not in ['ADMIN', 'SUPERUSER']:
+            return Response({
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'You do not have permission to perform this action',
+                'data': None
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # Base queryset
+        comments = UserComment.objects.all()
+
+        # Optional filtering by review status
+        is_reviewed = request.query_params.get('is_reviewed')
+        if is_reviewed is not None:
+            comments = comments.filter(is_reviewed=is_reviewed.lower() == 'true')
+
+        # Serialize all comments
+        serializer = UserCommentSerializer(comments, many=True)
+
+        return Response({
+            'responseCode': status.HTTP_200_OK,
+            'message': 'All comments retrieved successfully',
+            'data': {
+                'comments': serializer.data,
+                'total_comments': comments.count()
             }
         })

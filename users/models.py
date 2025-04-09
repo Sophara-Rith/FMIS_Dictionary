@@ -1,6 +1,7 @@
 # users/models.py
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import models
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
@@ -59,12 +60,24 @@ class User(AbstractBaseUser):
         ('SUPERUSER', 'Super User')
     )
 
+    SEX_CHOICES = (
+        ('MALE', 'Male'),
+        ('FEMALE', 'Female'),
+        ('OTHER', 'Other'),
+        ('PREFER_NOT_TO_SAY', 'Prefer Not to Say')
+    )
+
     username = models.CharField(max_length=150, unique=True)
     email = models.EmailField(unique=True, validators=[validate_fmis_email])
+    username_kh = models.CharField(max_length=150,blank=True,null=True,verbose_name='Khmer Username')
+    sex = models.CharField(max_length=20, choices=SEX_CHOICES, blank=True, null=True, verbose_name='Sex')
+    staff_id = models.CharField(max_length=50,unique=True,blank=True,null=True,verbose_name='Staff Identification Number')
+    position = models.CharField(max_length=100,blank=True,null=True,verbose_name='Job Position')
+    phone_number = models.CharField(max_length=20,blank=True,null=True,verbose_name='Phone Number')
+    profile_picture = models.ImageField(upload_to='profile_pictures/',blank=True,null=True,verbose_name='Profile Picture')
+
     first_name = models.CharField(max_length=100, null=True, blank=True)
     last_name = models.CharField(max_length=100, null=True, blank=True)
-
-    phone_number = models.CharField(max_length=20, null=True, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='USER')
 
     is_active = models.BooleanField(default=True)
@@ -84,6 +97,10 @@ class User(AbstractBaseUser):
 
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = ['email']
+
+    class Meta:
+        verbose_name = 'User'
+        verbose_name_plural = 'Users'
 
     def __str__(self):
         return self.username
@@ -153,3 +170,23 @@ class MobileDevice(models.Model):
             'access_token': self.access_token,
             'refresh_token': self.refresh_token
         }
+
+User = get_user_model()
+
+class UserComment(models.Model):
+    """
+    Model to store user comments submitted through mobile app
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
+    device_id = models.CharField(max_length=255, null=True, blank=True)
+    detail = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_reviewed = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'User Comment'
+        verbose_name_plural = 'User Comments'
+
+    def __str__(self):
+        return f"Comment by {self.user.username} at {self.created_at}"

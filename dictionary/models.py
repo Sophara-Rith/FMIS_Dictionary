@@ -185,8 +185,8 @@ class Dictionary(models.Model):
     index = models.IntegerField(unique=True)
 
     # New fields for parent-child relationship
-    is_parent = models.BooleanField(default=False)
-    is_child = models.BooleanField(default=False)
+    is_parent = models.IntegerField(default=0)
+    is_child = models.IntegerField(default=0)
 
     def clean(self):
         if self.is_parent and self.is_child:
