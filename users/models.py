@@ -98,6 +98,14 @@ class User(AbstractBaseUser):
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = ['email']
 
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    def soft_delete(self):
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.save()
+
     class Meta:
         verbose_name = 'User'
         verbose_name_plural = 'Users'
@@ -110,6 +118,11 @@ class User(AbstractBaseUser):
 
     def has_module_perms(self, app_label):
         return self.is_superuser
+
+class UserManager(BaseUserManager):
+    def get_queryset(self):
+        # Override default queryset to exclude soft-deleted users
+        return super().get_queryset().filter(is_deleted=False)
 
 class MobileDevice(models.Model):
     user = models.ForeignKey(

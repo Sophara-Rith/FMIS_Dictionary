@@ -4,3 +4,18 @@
 [2025-04-18 22:04:14,937] ERROR basehttp 18792 15964 - "POST /api/users/login/ HTTP/1.1" 500 86
 [2025-04-18 22:06:23,383] ERROR log 7820 17320 - Internal Server Error: /api/users/login/
 [2025-04-18 22:06:23,384] ERROR basehttp 7820 17320 - "POST /api/users/login/ HTTP/1.1" 500 86
+[2025-04-19 00:30:02,003] ERROR log 19132 15544 - Internal Server Error: /api/users/drop
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via DELETE, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining DELETE data. Change your form to point to 127.0.0.1:9991/api/users/drop/?id=43 (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-19 00:30:02,009] ERROR basehttp 19132 15544 - "DELETE /api/users/drop?id=43 HTTP/1.1" 500 86697

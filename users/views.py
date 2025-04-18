@@ -287,16 +287,17 @@ class UserListView(APIView):
             role = request.query_params.get('role')
             is_active = request.query_params.get('is_active')
 
-            # Base queryset
-            users = User.objects.all()
+            # Base queryset with soft delete filter
+            users = User.objects.filter(is_deleted=False)
 
             # Apply filters if provided
             if role:
                 users = users.filter(role=role)
+
             if is_active is not None:
                 users = users.filter(is_active=is_active.lower() == 'true')
 
-            # Transform data - return all users without pagination
+            # Transform data - return all non-deleted users without pagination
             user_data = [{
                 'id': user.id,
                 'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
@@ -564,11 +565,11 @@ class UserDropView(APIView):
             # Find user
             user = None
             if user_id:
-                user = get_object_or_404(User, id=user_id)
+                user = get_object_or_404(User, id=user_id, is_deleted=False)
             elif username:
-                user = get_object_or_404(User, username=username)
+                user = get_object_or_404(User, username=username, is_deleted=False)
             elif email:
-                user = get_object_or_404(User, email=email)
+                user = get_object_or_404(User, email=email, is_deleted=False)
             else:
                 return Response({
                     'responseCode': status.HTTP_400_BAD_REQUEST,
@@ -593,19 +594,18 @@ class UserDropView(APIView):
                 }, status=status.HTTP_403_FORBIDDEN)
 
             # Store user details before deletion
-            user_details = {
-                'username': user.username,
-                'email': user.email,
-                'role': user.role
-            }
+            # user_details = {
+            #     'username': user.username,
+            #     'email': user.email,
+            #     'role': user.role
+            # }
 
-            # Delete user
-            user.delete()
+            user.soft_delete()
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'User deleted successfully',
-                'data': user_details
+                'data': None
             })
 
         except Exception as e:
