@@ -1,6 +1,6 @@
 # dictionary/serializers.py
 from rest_framework import serializers
-from .models import Staging, Dictionary, WordType, Bookmark
+from .models import RelatedWord, Staging, Dictionary, WordType, Bookmark
 from django.utils import timezone
 from django.db.models import Q
 
@@ -156,10 +156,10 @@ class BookmarkSerializer(serializers.ModelSerializer):
             # "example_sentence_en": word.example_sentence_en
         }
 
-
 class DictionaryEntrySerializer(serializers.ModelSerializer):
     word_related = serializers.SerializerMethodField()
     is_bookmark = serializers.SerializerMethodField()
+    is_parent = serializers.SerializerMethodField()
 
     class Meta:
         model = Dictionary
@@ -176,56 +176,54 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             'word_related'
         ]
 
+    def get_is_parent(self, obj):
+        """Convert boolean is_parent to integer (1 or 0)"""
+        return 1 if obj.is_parent else 0
+
     def get_word_related(self, obj):
-        # If is_parent is True, find related words
-        if obj.is_parent:
-            # Find words that contain the parent word
-            related_words = Dictionary.objects.filter(
-                Q(word_en__contains=obj.word_en) |
-                Q(word_kh__contains=obj.word_kh)
-            ).exclude(id=obj.id)
+        # Only return related words if this is a parent word
+        if not obj.is_parent:
+            return None
 
-            if related_words.exists():
-                return [
-                    {
-                        'id': rw.id,
-                        'word_kh': rw.word_kh,
-                        'word_en': rw.word_en,
-                        # 'word_kh_type': rw.word_kh_type,
-                        # 'word_en_type': rw.word_en_type,
-                        # 'word_kh_definition': rw.word_kh_definition,
-                        # 'word_en_definition': rw.word_en_definition,
-                        # 'is_bookmark': 0,
-                        # 'is_child': True
-                    } for rw in related_words
-                ]
+        # Check if we have prefetched child words
+        if hasattr(obj, 'prefetched_child_words'):
+            related_words = obj.prefetched_child_words
+        else:
+            # Fallback to database query if not prefetched
+            related_words = RelatedWord.objects.filter(
+                parent_word=obj
+            ).select_related('child_word')
 
-            return {"message": "There is no related word."}
+        if not related_words:
+            return None
 
-        return {"message": "There is no related word."}
+        # Format the related words as required
+        return [
+            {
+                'related_id': relation.child_word.id,
+                'related_word_kh': relation.child_word.word_kh,
+                'related_word_en': relation.child_word.word_en
+            } for relation in related_words
+        ]
 
     def get_is_bookmark(self, obj):
-        # Get request from context
+        # Get bookmarked IDs from context if available (for bulk operations)
+        bookmarked_ids = self.context.get('bookmarked_ids')
+        if bookmarked_ids is not None:
+            return 1 if obj.id in bookmarked_ids else 0
+
+        # Fall back to individual lookup if needed
         request = self.context.get('request')
         if not request:
             return 0
 
-        # Get device ID from headers
         device_id = request.headers.get('X-Device-ID')
         if not device_id:
             return 0
 
-        # Check if the word is bookmarked for this device
-        from .models import Bookmark
-        bookmark_exists = Bookmark.objects.filter(
-            device_id=device_id,
-            word=obj
-        ).exists()
-
-        return 1 if bookmark_exists else 0
+        return 1 if Bookmark.objects.filter(device_id=device_id, word=obj).exists() else 0
 
     def validate(self, data):
-        # Ensure is_parent and is_child are mutually exclusive
         is_parent = data.get('is_parent', self.instance.is_parent if self.instance else False)
         is_child = data.get('is_child', self.instance.is_child if self.instance else False)
 

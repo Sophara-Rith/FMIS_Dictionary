@@ -11,6 +11,8 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
+
+from debug_utils import debug_error
 from .models import MobileDevice, User
 from .serializers import UserSerializer
 from drf_yasg.utils import swagger_auto_schema
@@ -19,6 +21,88 @@ from drf_yasg import openapi
 User = get_user_model()
 
 logger = logging.getLogger(__name__)
+
+def format_date(date_obj):
+    """
+    Convert datetime object to 'DD-MM-YYYY' format
+    """
+    if not date_obj:
+        return None
+    return date_obj.strftime('%d-%m-%Y')
+
+def convert_to_khmer_number(text):
+    """
+    Convert Latin numbers to Khmer numbers
+    """
+    latin_to_khmer = {
+        '0': '០',
+        '1': '១',
+        '2': '២',
+        '3': '៣',
+        '4': '៤',
+        '5': '៥',
+        '6': '៦',
+        '7': '៧',
+        '8': '៨',
+        '9': '៩'
+    }
+
+    # If input is None or not a string, return as is
+    if not isinstance(text, str):
+        return text
+
+    # Convert each Latin digit to Khmer
+    return ''.join(latin_to_khmer.get(char, char) for char in text)
+
+def convert_to_khmer_date(date_str):
+    """
+    Convert Gregorian date to Khmer date format
+
+    Args:
+        date_str (str): Date in format 'DD-MM-YYYY'
+
+    Returns:
+        str: Date in Khmer format 'DD-Month-YYYY'
+    """
+    # Khmer month names
+    khmer_months = {
+        '01': 'មករា',
+        '02': 'កុម្ភៈ',
+        '03': 'មីនា',
+        '04': 'មេសា',
+        '05': 'ឧសភា',
+        '06': 'មិថុនា',
+        '07': 'កក្កដា',
+        '08': 'សីហា',
+        '09': 'កញ្ញា',
+        '10': 'តុលា',
+        '11': 'វិច្ឆិកា',
+        '12': 'ធ្នូ'
+    }
+
+    # Khmer number mapping
+    khmer_numbers = {
+        '0': '០', '1': '១', '2': '២', '3': '៣', '4': '៤',
+        '5': '៥', '6': '៦', '7': '៧', '8': '៨', '9': '៩'
+    }
+
+    def convert_to_khmer_number(num_str):
+        return ''.join(khmer_numbers.get(digit, digit) for digit in num_str)
+
+    try:
+        # Split the date
+        day, month, year = date_str.split('-')
+
+        # Convert to Khmer
+        khmer_day = convert_to_khmer_number(day)
+        khmer_month = khmer_months.get(month, month)
+        khmer_year = convert_to_khmer_number(year)
+
+        return f"{khmer_day}-{khmer_month}-{khmer_year}"
+
+    except Exception as e:
+        # If conversion fails, return original string
+        return date_str
 
 class UserLoginView(APIView):
     permission_classes = [AllowAny]
@@ -51,7 +135,18 @@ class UserLoginView(APIView):
                             type=openapi.TYPE_OBJECT,
                             properties={
                                 'refresh': openapi.Schema(type=openapi.TYPE_STRING),
-                                'access': openapi.Schema(type=openapi.TYPE_STRING)
+                                'access': openapi.Schema(type=openapi.TYPE_STRING),
+                                'user': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'position': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
+                                    }
+                                )
                             }
                         )
                     }
@@ -59,6 +154,7 @@ class UserLoginView(APIView):
             )
         }
     )
+    @debug_error
     def post(self, request):
         # Extract login credentials
         login_input = request.data.get('login_input', '').strip()
@@ -90,7 +186,16 @@ class UserLoginView(APIView):
                     'message': 'Login successful',
                     'data': {
                         'refresh': str(refresh),
-                        'access': str(refresh.access_token)
+                        'access': str(refresh.access_token),
+                        'user': {
+                            'username': user.username,
+                            'username_kh': user.username_kh or '',
+                            'email': user.email,
+                            'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
+                            'position': user.position or '',
+                            'phone_number': convert_to_khmer_number(user.phone_number) if user.phone_number else '',
+                            'role': user.role or ''
+                        }
                     }
                 }, status=status.HTTP_200_OK)
             else:
@@ -112,7 +217,7 @@ class UserListView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="View list of all users",
+        operation_description="View list of all users without pagination",
         responses={
             200: openapi.Response(
                 description='Users retrieved successfully',
@@ -122,7 +227,26 @@ class UserListView(APIView):
                         'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
                         'message': openapi.Schema(type=openapi.TYPE_STRING),
                         'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'users': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'id': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'sex': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'position': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'phone_number': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'date_joined': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
+                                            'role': openapi.Schema(type=openapi.TYPE_STRING)
+                                        }
+                                    )
+                                )
+                            }
                         )
                     }
                 )
@@ -140,6 +264,7 @@ class UserListView(APIView):
             )
         }
     )
+    @debug_error
     def get(self, request):
         # Explicit check for authentication
         if not request.user or not request.user.is_authenticated:
@@ -158,51 +283,46 @@ class UserListView(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            # Pagination and filtering logic
-            page = int(request.query_params.get('page', 1))
-            per_page = int(request.query_params.get('per_page', 25))
+            # Optional filtering parameters
             role = request.query_params.get('role')
             is_active = request.query_params.get('is_active')
 
             # Base queryset
             users = User.objects.all()
 
-            # Apply filters
+            # Apply filters if provided
             if role:
                 users = users.filter(role=role)
             if is_active is not None:
                 users = users.filter(is_active=is_active.lower() == 'true')
 
-            # Pagination
-            start = (page - 1) * per_page
-            end = start + per_page
-            paginated_users = users[start:end]
-
-            # Transform data
+            # Transform data - return all users without pagination
             user_data = [{
-                'username': user.username,
+                'id': user.id,
+                'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
+                'username_kh': user.username_kh or '',
+                'sex': user.sex or '',
+                'position': user.position or '',
                 'email': user.email,
+                'phone_number': convert_to_khmer_number(user.phone_number) if user.phone_number else '',
+                'date_joined': convert_to_khmer_date(user.date_joined.strftime('%d-%m-%Y')) if user.date_joined else '',
                 'role': user.role
-            } for user in paginated_users]
+            } for user in users]
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
-                'message': 'Data retrieved successfully',
+                'message': 'Users retrieved successfully',
                 'data': {
                     'users': user_data
-                },
-                'total_users': users.count(),
-                'page': page,
-                'per_page': per_page,
-                'total_pages': (users.count() + per_page - 1) // per_page
+                }
             })
 
         except Exception as e:
             return Response({
-                'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Authentication failed',
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': f'Failed to retrieve users: {str(e)}',
                 'data': None
-            }, status=status.HTTP_401_UNAUTHORIZED)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserDetailView(APIView):
     permission_classes = [IsAuthenticated]

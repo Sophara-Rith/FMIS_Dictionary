@@ -199,7 +199,7 @@ class Dictionary(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['index'],
+                fields=['index', 'word_en'],
                 name='unique_dictionary_index'
             )
         ]

@@ -11,8 +11,8 @@ logging.basicConfig(
 )
 
 # Configuration
-BASE_URL = 'http://172.23.23.48:9991/api/dictionary/staging/{}/approve/'
-TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQzNTcwNDIwLCJpYXQiOjE3NDM1NjY4MjAsImp0aSI6IjViY2JlZWQ5MDQ3OTRkMTk5MzE2Yjk3ZmVmMGQxZTkyIiwidXNlcl9pZCI6NX0.yht98oz4zfVkD848NVXGG2zmSfOZzS5DfSF67JRHVM8'  # Replace with your actual bearer token
+BASE_URL = 'http://127.0.0.1:9991/api/dictionary/staging/{}/approve/'
+TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQ0OTYxOTAyLCJpYXQiOjE3NDQ5NTgzMDIsImp0aSI6ImE5MzViMTNhZTJmNjRlOGVhYjMyYzBjZWQ4NDhmYzUyIiwidXNlcl9pZCI6NX0.1QkNZ_oW4OxhVjPLV1yxJfcMR2yuMoW17AfF-A9jqo0'  # Replace with your actual bearer token
 
 # Headers for the request
 HEADERS = {
@@ -103,8 +103,8 @@ def bulk_approve_entries(start_id=9, end_id=88, max_workers=5):
 
 def main():
     # Retry mechanism for failed entries
-    start_id, end_id = 9, 88
-    max_retries = 3
+    start_id, end_id = 1, 10127
+    max_retries = 2
 
     for attempt in range(max_retries):
         logging.info(f"\nApproval Attempt {attempt + 1}")
@@ -120,9 +120,6 @@ def main():
         failed_ids = [entry_id for entry_id, _ in failed]
         start_id = min(failed_ids)
         end_id = max(failed_ids)
-
-        # Wait before retry
-        time.sleep(5)
 
     logging.info("Bulk approval process completed.")
 
