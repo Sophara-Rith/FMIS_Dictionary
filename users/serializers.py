@@ -3,37 +3,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
 import re
-from .models import User, UserComment
-
-def format_phone_number(phone_number):
-    """
-    Format phone number by splitting into groups of 3 digits
-
-    Examples:
-    - 092457452 -> 092 457 452
-    - 0964567890 -> 096 456 7890
-    """
-    # Remove any existing spaces or non-digit characters
-    cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
-
-    # Handle different phone number lengths
-    if len(cleaned_number) < 9:
-        return cleaned_number  # Return original if too short
-
-    # Different formatting based on number length
-    if len(cleaned_number) == 9:
-        # Standard 9-digit number (092457452)
-        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
-    elif len(cleaned_number) == 10:
-        # 10-digit number (0964567890)
-        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
-    else:
-        # For longer numbers, use a more flexible approach
-        return ' '.join([
-            cleaned_number[:3],  # First 3 digits
-            cleaned_number[3:6],  # Next 3 digits
-            cleaned_number[6:]    # Remaining digits
-        ])
+from .models import User
 
 class LoginSerializer(serializers.Serializer):
     """
@@ -128,45 +98,14 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'username',
-            'username_kh',
-            'email',
-            'password',
-            'phone_number',
-            'role',
-            'staff_id',
-            'position',
-            'sex'
+            'id', 'username', 'email', 'password',
+            'role', 'phone_number'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
             'id': {'read_only': True},
-            'phone_number': {'required': False},
-            'username_kh': {'required': False},
-            'staff_id': {'required': False},
-            'position': {'required': False},
-            'sex': {'required': False}
+            'phone_number': {'required': False}
         }
-
-    def validate_phone_number(self, value):
-        """
-        Validate phone number format
-        """
-        if not value:
-            return value
-
-        # Remove non-digit characters
-        cleaned_number = ''.join(filter(str.isdigit, str(value)))
-
-        # Validate number length and format
-        if not cleaned_number:
-            raise serializers.ValidationError("Phone number must contain digits")
-
-        # Optional: Add specific validation for Cambodian phone numbers
-        if not (cleaned_number.startswith('0') and len(cleaned_number) in [9, 10]):
-            raise serializers.ValidationError("Invalid phone number format")
-
-        return value
 
     def validate_password(self, password):
         """
@@ -175,39 +114,41 @@ class UserSerializer(serializers.ModelSerializer):
         return PasswordValidator.validate_password(password)
 
     def create(self, validated_data):
+        password = validated_data.pop('password')
 
-        sex = validated_data.pop('sex', None)
-        phone_number = validated_data.get('phone_number')
-        if phone_number:
-            validated_data['phone_number'] = format_phone_number(phone_number)
-
-        username_kh = validated_data.pop('username_kh', '')
-        staff_id = validated_data.pop('staff_id', '')
-        position = validated_data.pop('position', '')
+        try:
+            PasswordValidator.validate_password(password)
+        except serializers.ValidationError as e:
+            raise serializers.ValidationError({'password': str(e)})
 
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password'],
-            phone_number=validated_data.get('phone_number'),
-            role=validated_data.get('role')
+            password=password,
+            phone_number=validated_data.get('phone_number')
         )
-
-        user.username_kh = username_kh
-        user.staff_id = staff_id
-        user.position = position
-        user.sex = sex
-        user.save()
-
         return user
 
     def update(self, instance, validated_data):
-        instance.username_kh = validated_data.get('username_kh', instance.username_kh)
-        instance.staff_id = validated_data.get('staff_id', instance.staff_id)
-        instance.position = validated_data.get('position', instance.position)
-        instance.sex = validated_data.get('sex', instance.sex)
+        # Password update with validation
+        password = validated_data.get('password')
 
-        return super().update(instance, validated_data)
+        if password:
+            # Validate password before updating
+            try:
+                PasswordValidator.validate_password(password)
+            except serializers.ValidationError as e:
+                raise serializers.ValidationError({'password': str(e)})
+
+            # Set new password
+            instance.set_password(password)
+
+        # Update other fields
+        instance.email = validated_data.get('email', instance.email)
+        instance.phone_number = validated_data.get('phone_number', instance.phone_number)
+
+        instance.save()
+        return instance
 
 class UserManagementSerializer(serializers.ModelSerializer):
     """
@@ -289,41 +230,3 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'role': user.role
             }
         }
-
-class UserCommentSerializer(serializers.ModelSerializer):
-    username = serializers.SerializerMethodField()
-
-    class Meta:
-        model = UserComment
-        fields = [
-            'id',
-            'username',
-            'detail',
-            'device_id',
-            'created_at',
-            'is_reviewed'
-        ]
-        read_only_fields = ['id', 'created_at']
-
-    def get_username(self, obj):
-        return obj.user.username
-
-class UserCommentSubmitSerializer(serializers.ModelSerializer):
-    """
-    Serializer specifically for mobile app comment submission
-    """
-    class Meta:
-        model = UserComment
-        fields = ['detail', 'device_id']
-
-    def create(self, validated_data):
-        # Get the current authenticated user
-        user = self.context['request'].user
-
-        # Create comment with the current user
-        comment = UserComment.objects.create(
-            user=user,
-            detail=validated_data['detail'],
-            device_id=validated_data.get('device_id')
-        )
-        return comment

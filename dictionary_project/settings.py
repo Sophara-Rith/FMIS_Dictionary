@@ -22,21 +22,6 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
 ]
 
-# def clean_cors_origins(origins_string):
-#     origins = origins_string.split(',')
-#     return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
-
-# CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
-
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3030',
-    'http://127.0.0.1:3030',
-    'http://172.23.81.204:8012',
-    'http://localhost:8012'
-]
-
-CORS_ALLOW_CREDENTIALS = True
-
 # Custom user model
 AUTH_USER_MODEL = 'users.User'
 
@@ -161,6 +146,7 @@ CACHES = {
     }
 }
 
+# JWT Token Configuration
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('ACCESS_TOKEN_LIFETIME', 60))),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('REFRESH_TOKEN_LIFETIME', 1))),
@@ -175,6 +161,16 @@ MOBILE_JWT_SETTINGS = {
     'BLACKLIST_AFTER_ROTATION': False,
 }
 
+CORS_ALLOWED_ORIGINS =os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
+
+# CORS Configuration
+def clean_cors_origins(origins_string):
+    origins = origins_string.split(',')
+    return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
+
+CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
+
+# Swagger config
 SWAGGER_SETTINGS = {
     'SECURITY_DEFINITIONS': {
         'Bearer': {
@@ -195,6 +191,7 @@ USE_TZ = True
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Logging Configuration
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

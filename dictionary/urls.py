@@ -30,14 +30,13 @@ urlpatterns = [
     path('staging/<int:pk>/update/', StagingEntryUpdateView.as_view(), name='staging-entry-update'),
     path('staging/<int:pk>/delete/', StagingEntryDeleteView.as_view(), name='staging-entry-delete'),
 
-    # Staging Entry Approval Routes
     path('staging/<int:pk>/approve/', StagingEntryApproveView.as_view(), name='staging-entry-approve'),
     path('staging/<int:pk>/reject/', StagingEntryRejectView.as_view(), name='staging-entry-reject'),
 
     path('bookmarks/', BookmarkView.as_view(), name='bookmarks'),
 
-    path('sync_all/', DictionarySyncAllView.as_view(), name='dictionary_sync_all'),
-    path('sync/', DictionarySyncView.as_view(), name='dictionary_sync'),
+    path('sync_all', DictionarySyncAllView.as_view(), name='dictionary_sync_all'),
+    path('sync', DictionarySyncView.as_view(), name='dictionary_sync'),
 
     path('search/', DictionarySearchView.as_view(), name='dictionary-search'),
 

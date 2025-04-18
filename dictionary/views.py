@@ -18,14 +18,13 @@ from django.utils import timezone
 from django.http import FileResponse
 from django.core.cache import cache
 from django.conf import settings
-from django.db.models import Q, Max, Case, When, Value, IntegerField
+from django.db.models import Q, Max, Case, When, Value, IntegerField, Prefetch
 from .models import Dictionary, Staging, Bookmark, WordType, RelatedWord
 from .serializers import (
     DictionaryEntrySerializer,
     BookmarkSerializer,
     StagingEntrySerializer,
     StagingEntryCreateSerializer,
-    DictionaryEntrySyncSerializer
 )
 from debug_utils import debug_error
 from .tasks import process_staging_bulk_import
@@ -33,6 +32,48 @@ from .utils import DictionaryTemplateGenerator
 from dictionary import models
 
 logger = logging.getLogger(__name__)
+
+def process_word_relationships(word_entry):
+    """
+    Process word relationships based on the rules:
+    - Single word: is_parent=True, is_child=False
+    - Multiple words: Check if components exist, mark as children
+    """
+    # Split the word_en to check if it contains multiple words
+    words = word_entry.word_en.split()
+
+    if len(words) == 1:
+        # Single word - mark as parent
+        word_entry.is_parent = True
+        word_entry.is_child = False
+        word_entry.save()
+        return
+
+    # Multiple words - check if any exist in dictionary
+    word_entry.is_parent = False
+
+    # Look for potential parent words
+    potential_parents = Dictionary.objects.filter(
+        word_en__in=words,
+        is_parent=True
+    )
+
+    if potential_parents.exists():
+        # This word is a child of existing parent words
+        word_entry.is_child = True
+        word_entry.save()
+
+        # Create relationships with parent words
+        for parent in potential_parents:
+            RelatedWord.objects.get_or_create(
+                parent_word=parent,
+                child_word=word_entry,
+                defaults={'relationship_type': 'COMPOUND'}
+            )
+    else:
+        # No parents found, this could be a new parent word
+        word_entry.is_child = False
+        word_entry.save()
 
 class DictionaryEntryListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -218,20 +259,13 @@ class StagingEntryCreateView(APIView):
         ),
         responses={
             201: openapi.Response(
-                description='Staging entry created successfully',
+                description='Entry created successfully',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                        'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                        'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
-                        'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                        'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
                     }
                 )
             ),
@@ -240,23 +274,115 @@ class StagingEntryCreateView(APIView):
     )
     @debug_error
     def post(self, request):
+        # Check if the user is an ADMIN or SUPERUSER
+        is_admin_or_superuser = request.user.role in ['ADMIN', 'SUPERUSER']
+
+        # Prepare serializer
         serializer = StagingEntryCreateSerializer(
             data=request.data,
             context={'request': request}
         )
 
         if serializer.is_valid():
-            # Save staging entry
-            staging_entry = serializer.save()
+            # If ADMIN/SUPERUSER, create directly in Dictionary
+            if is_admin_or_superuser:
+                try:
+                    # Check for existing entry
+                    existing_entry = Dictionary.objects.filter(
+                        Q(word_en=serializer.validated_data.get('word_en'))
+                    ).first()
 
-            # Process related words
-            self._process_related_words(staging_entry)
+                    if existing_entry:
+                        return Response({
+                            'responseCode': status.HTTP_400_BAD_REQUEST,
+                            'message': 'The entry already exists',
+                            'data': None
+                        }, status=status.HTTP_400_BAD_REQUEST)
 
-            return Response({
-                'responseCode': status.HTTP_201_CREATED,
-                'message': 'Staging entry created successfully',
-                'data': serializer.data
-            }, status=status.HTTP_201_CREATED)
+                    # Generate next index
+                    next_index = self._generate_unique_index()
+
+                    # Create Dictionary entry directly
+                    dictionary_entry = Dictionary.objects.create(
+                        index=next_index,
+                        word_kh=serializer.validated_data.get('word_kh'),
+                        word_en=serializer.validated_data.get('word_en'),
+                        word_kh_type=serializer.validated_data.get('word_kh_type'),
+                        word_en_type=serializer.validated_data.get('word_en_type'),
+                        word_kh_definition=serializer.validated_data.get('word_kh_definition'),
+                        word_en_definition=serializer.validated_data.get('word_en_definition'),
+                        pronunciation_kh=serializer.validated_data.get('pronunciation_kh', ''),
+                        pronunciation_en=serializer.validated_data.get('pronunciation_en', ''),
+                        example_sentence_kh=serializer.validated_data.get('example_sentence_kh', ''),
+                        example_sentence_en=serializer.validated_data.get('example_sentence_en', ''),
+                        created_by=request.user,
+                        is_parent=False,
+                        is_child=False
+                    )
+
+                    # Process word relationships
+                    process_word_relationships(dictionary_entry)
+
+                    # Prepare response data
+                    # response_data = {
+                    #     'id': dictionary_entry.id,
+                    #     'word_kh': dictionary_entry.word_kh,
+                    #     'word_en': dictionary_entry.word_en,
+                    #     'is_parent': dictionary_entry.is_parent,
+                    #     'is_child': dictionary_entry.is_child
+                    # }
+
+                    return Response({
+                        'responseCode': status.HTTP_201_CREATED,
+                        'message': 'Dictionary entry created directly',
+                        'data': None
+                    }, status=status.HTTP_201_CREATED)
+
+                except Exception as e:
+                    return Response({
+                        'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        'message': f'Failed to create dictionary entry: {str(e)}',
+                        'data': None
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # For non-admin users, create in Staging
+            else:
+                # Check for existing entry in Staging
+                existing_staging_entry = Staging.objects.filter(
+                    Q(word_en=serializer.validated_data.get('word_en'))
+                ).first()
+
+                if existing_staging_entry:
+                    return Response({
+                        'responseCode': status.HTTP_400_BAD_REQUEST,
+                        'message': 'The entry already exists',
+                        'data': {
+                            'id': existing_staging_entry.id,
+                            'word_kh': existing_staging_entry.word_kh,
+                            'word_en': existing_staging_entry.word_en,
+                            'review_status': existing_staging_entry.review_status
+                        }
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Save staging entry with default parent/child values
+                staging_entry = serializer.save(
+                    created_by=request.user,
+                    is_parent=False,
+                    is_child=False,
+                    review_status='PENDING'
+                )
+
+                # Process potential word relationships for staging
+                self._process_staging_word_relationships(staging_entry)
+
+                # Refresh the serializer data to include updated fields
+                updated_serializer = StagingEntrySerializer(staging_entry)
+
+                return Response({
+                    'responseCode': status.HTTP_201_CREATED,
+                    'message': 'Staging entry created successfully',
+                    'data': updated_serializer.data
+                }, status=status.HTTP_201_CREATED)
 
         return Response({
             'responseCode': status.HTTP_400_BAD_REQUEST,
@@ -264,58 +390,43 @@ class StagingEntryCreateView(APIView):
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    def _process_related_words(self, staging_entry):
-        # Process Khmer words
-        kh_words = staging_entry.word_kh.split()
-        self._find_and_link_related_words(kh_words, staging_entry, 'word_kh')
-
-        # Process English words
-        en_words = staging_entry.word_en.split()
-        self._find_and_link_related_words(en_words, staging_entry, 'word_en')
-
-    def _find_and_link_related_words(self, words, staging_entry, word_field):
-        # Single word scenario
-        if len(words) == 1:
-            # Check if word already exists in dictionary
-            existing_word = Dictionary.objects.filter(**{word_field: words[0]}).first()
-            if not existing_word:
-                # If single word and not in dictionary, mark as potential parent
-                staging_entry.is_parent = True
-                staging_entry.is_child = False
-                staging_entry.save()
-            return
-
-        # Multiple word scenario
-        parent_words = []
-        full_phrase = ' '.join(words)
-
-        # Check each word if it exists in dictionary
-        for word in words:
-            existing_word = Dictionary.objects.filter(**{word_field: word}).first()
-            if existing_word and existing_word.is_parent:
-                # If word exists and is a parent, add to potential parents
-                parent_words.append(existing_word)
-
-        # If we have parent words, mark the full phrase as a child
-        if parent_words:
-            staging_entry.is_parent = False
-            staging_entry.is_child = True
-            staging_entry.save()
-
-            # Create related word entries for each parent word
-            for parent_word in parent_words:
-                RelatedWord.objects.get_or_create(
-                    parent_word=parent_word,
-                    child_word=Dictionary.objects.filter(**{word_field: full_phrase}).first(),
-                    defaults={
-                        'relationship_type': 'COMPOUND'
-                    }
-                )
-
     def _generate_unique_index(self):
-        # Generate a unique index
+        """Generate a unique index for Dictionary entries"""
         max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
         return max_index + 1
+
+    def _process_staging_word_relationships(self, staging_entry):
+        """
+        Process word relationships for staging entries
+        Similar to the method in the previous implementation
+        """
+        # Split the word_en to check if it contains multiple words
+        words = staging_entry.word_en.split()
+
+        if len(words) == 1:
+            # Single word - mark as parent
+            staging_entry.is_parent = True
+            staging_entry.is_child = False
+            staging_entry.save()
+            return
+
+        # Multiple words - check if any exist in dictionary
+        staging_entry.is_parent = False
+
+        # Look for potential parent words
+        potential_parents = Dictionary.objects.filter(
+            word_en__in=words,
+            is_parent=True
+        ).distinct()
+
+        if potential_parents.exists():
+            # This word is a child of existing parent words
+            staging_entry.is_child = True
+            staging_entry.save()
+        else:
+            # No parents found, this could be a new parent word
+            staging_entry.is_child = False
+            staging_entry.save()
 
 def generate_next_index():
     """
@@ -349,18 +460,18 @@ class StagingEntryApproveView(APIView):
                 word_kh_definition=staging_entry.word_kh_definition,
                 word_en_definition=staging_entry.word_en_definition,
                 created_by=request.user,
-
-                # Transfer parent-child status from staging
-                is_parent=staging_entry.is_parent,
-                is_child=staging_entry.is_child
+                # Don't set is_parent/is_child yet - will be determined by process_word_relationships
+                is_parent=False,
+                is_child=False
             )
 
-            # Process related words if it's a multi-word entry
-            if staging_entry.is_child:
-                self._process_related_words(dictionary_entry, staging_entry)
+            # Process word relationships
+            process_word_relationships(dictionary_entry)
 
             # Update staging entry status
             staging_entry.review_status = 'APPROVED'
+            staging_entry.reviewed_by = request.user
+            staging_entry.reviewed_at = timezone.now()
             staging_entry.save()
 
             return Response({
@@ -378,34 +489,6 @@ class StagingEntryApproveView(APIView):
                 'responseCode': status.HTTP_404_NOT_FOUND,
                 'message': 'Staging entry not found'
             }, status=status.HTTP_404_NOT_FOUND)
-
-    def _process_related_words(self, new_word, staging_entry):
-        # Ensure mutually exclusive parent/child status
-        if staging_entry.is_parent:
-            new_word.is_parent = True
-            new_word.is_child = False
-        elif staging_entry.is_child:
-            new_word.is_parent = False
-            new_word.is_child = True
-
-        new_word.save()
-
-        # Find and link related words
-        words = staging_entry.word_en.split()
-        full_phrase = staging_entry.word_en
-
-        # Check for parent words
-        for word in words:
-            parent_word = Dictionary.objects.filter(word_en=word, is_parent=True).first()
-            if parent_word:
-                # Create RelatedWord entry
-                RelatedWord.objects.get_or_create(
-                    parent_word=parent_word,
-                    child_word=new_word,
-                    defaults={
-                        'relationship_type': 'COMPOUND'
-                    }
-                )
 
     def _generate_unique_index(self):
         max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
@@ -1498,11 +1581,152 @@ class BookmarkView(APIView):
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class DictionarySyncAllView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Full Dictionary Synchronization for Mobile App",
+        tags=['mobile'],
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique Device Identifier',
+                required=True
+            ),
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number for pagination",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of entries per page",
+                type=openapi.TYPE_INTEGER,
+                default=25
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Full Dictionary Sync Successful',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'entries': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(type=openapi.TYPE_OBJECT)
+                                ),
+                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'last_sync_timestamp': openapi.Schema(type=openapi.TYPE_STRING),
+                                'current_sync_timestamp': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
+                    }
+                )
+            )
+        }
+    )
+    @debug_error
+    def get(self, request):
+        try:
+            # Get device ID from headers
+            device_id = request.headers.get('X-Device-ID')
+
+            # Validate device ID
+            if not device_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Device ID is required',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Pagination parameters
+            page = max(1, int(request.GET.get('page', 1)))
+            per_page = max(1, min(int(request.GET.get('per_page', 20)), 100))  # Limit max per_page to 100
+
+            # Get all bookmarked word IDs for this device in one query
+            bookmarked_ids = set(Bookmark.objects.filter(device_id=device_id)
+                                .values_list('word_id', flat=True))
+
+            # Calculate pagination
+            # Prioritize parent words, then other entries
+            entries_query = Dictionary.objects.annotate(
+                parent_priority=Case(
+                    When(is_parent=True, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField()
+                )
+            ).order_by('parent_priority', 'id')
+
+            # Prefetch related words for parent entries
+            entries_query = entries_query.prefetch_related(
+                Prefetch(
+                    'child_words',
+                    queryset=RelatedWord.objects.select_related('child_word'),
+                    to_attr='prefetched_child_words'
+                )
+            )
+
+            # Calculate total entries and pages
+            total_entries = entries_query.count()
+            total_pages = (total_entries + per_page - 1) // per_page
+
+            # Apply pagination
+            entries = entries_query[(page-1)*per_page : page*per_page]
+
+            # Serialize entries with related words and bookmark status
+            serializer = DictionaryEntrySerializer(
+                entries,
+                many=True,
+                context={'request': request, 'bookmarked_ids': bookmarked_ids}
+            )
+
+            # Prepare response
+            current_time = timezone.now()
+            response_data = {
+                'entries': serializer.data,
+                'total_entries': total_entries,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': total_pages,
+                'last_sync_timestamp': (current_time - timezone.timedelta(minutes=2)).isoformat(),
+                'current_sync_timestamp': current_time.isoformat()
+            }
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Full dictionary synced successfully',
+                'data': response_data
+            })
+
+        except Exception as e:
+            # Detailed error logging
+            logger.error(f"Sync error: {str(e)}", exc_info=True)
+
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Internal server error',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class DictionarySyncView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Dictionary Synchronization based on Last Sync Timestamp",
+        operation_description="Incremental Dictionary Synchronization",
+        tags=['mobile'],
         manual_parameters=[
             openapi.Parameter(
                 'X-Device-ID',
@@ -1514,130 +1738,88 @@ class DictionarySyncView(APIView):
             openapi.Parameter(
                 'last_sync_timestamp',
                 openapi.IN_QUERY,
-                description="Timestamp of last synchronization to fetch updated entries",
                 type=openapi.TYPE_STRING,
+                description='Timestamp of last synchronization (ISO format)',
                 required=True
             )
         ],
         responses={
             200: openapi.Response(
-                description='Dictionary Sync Successful',
+                description='Incremental Sync Successful',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'responseCode': openapi.Schema(
-                            type=openapi.TYPE_INTEGER,
-                            description='HTTP status code',
-                            example=200
-                        ),
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Sync status message',
-                            example='Dictionary entries retrieved successfully'
-                        ),
-                        'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'entries': openapi.Schema(
-                                    type=openapi.TYPE_ARRAY,
-                                    items=openapi.Schema(
-                                        type=openapi.TYPE_OBJECT,
-                                        properties={
-                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'is_bookmark': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                            'is_parent': openapi.Schema(type=openapi.TYPE_BOOLEAN),
-                                            'wordRelates': openapi.Schema(
-                                                type=['array', 'object'],
-                                                description='Related words or message if no related words'
-                                            )
-                                        }
-                                    )
-                                ),
-                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'last_sync_timestamp': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    format='date-time'
-                                ),
-                                'current_sync_timestamp': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    format='date-time'
-                                )
-                            }
-                        )
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
                     }
                 )
             )
         }
     )
+    @debug_error
     def get(self, request):
         try:
-            # Get device ID from headers
+            # Get device ID and last sync timestamp
             device_id = request.headers.get('X-Device-ID')
+            last_sync_timestamp = request.query_params.get('last_sync_timestamp')
 
-            # Validate device ID
+            # Validate required parameters
             if not device_id:
                 return Response({
                     'responseCode': status.HTTP_400_BAD_REQUEST,
                     'message': 'Device ID is required',
-                    'data': None
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Extract last sync timestamp (required parameter)
-            last_sync_timestamp = request.query_params.get('last_sync_timestamp')
-
-            # Validate timestamp format
-            try:
-                last_sync = timezone.datetime.fromisoformat(last_sync_timestamp)
-            except (ValueError, TypeError):
-                return Response({
-                    'responseCode': status.HTTP_400_BAD_REQUEST,
-                    'message': 'Invalid last_sync_timestamp format. Use ISO format.',
                     'data': {}
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Query for new and updated entries since last sync
+            if not last_sync_timestamp:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Last sync timestamp is required',
+                    'data': {}
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                last_sync_time = timezone.datetime.fromisoformat(last_sync_timestamp)
+            except ValueError:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid timestamp format. Use ISO format (YYYY-MM-DDTHH:MM:SS.mmmmmm+HH:MM)',
+                    'data': {}
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Get all bookmarked word IDs for this device in one query
+            bookmarked_ids = set(Bookmark.objects.filter(device_id=device_id)
+                                .values_list('word_id', flat=True))
+
+            # Get updated entries since last sync
             updated_entries = Dictionary.objects.filter(
-                Q(created_at__gt=last_sync) |  # New entries
-                Q(updated_at__gt=last_sync)    # Updated existing entries
-            ).annotate(
-                parent_priority=Case(
-                    When(is_parent=True, then=Value(0)),
-                    default=Value(1),
-                    output_field=IntegerField()
+                Q(created_at__gt=last_sync_time) | Q(updated_at__gt=last_sync_time)
+            ).prefetch_related(
+                Prefetch(
+                    'child_words',
+                    queryset=RelatedWord.objects.select_related('child_word'),
+                    to_attr='prefetched_child_words'
                 )
-            ).order_by('parent_priority', 'id')
-
-            # Prepare current sync timestamp
-            current_sync_timestamp = timezone.now().isoformat()
-
-            # Serialize entries
-            serializer = DictionaryEntrySyncSerializer(
-                updated_entries,
-                many=True,
-                context={'request': request}
             )
 
-            # Prepare sync data
+            # Current timestamp for this sync
+            current_sync_timestamp = timezone.now().isoformat()
+
+            # Serialize updated entries
+            serializer = DictionaryEntrySerializer(
+                updated_entries,
+                many=True,
+                context={'request': request, 'bookmarked_ids': bookmarked_ids}
+            )
+
+            # Prepare response data
             sync_data = {
-                'entries': [{
-                    'id': entry.id,
-                    'word_kh': entry.word_kh,
-                    'word_en': entry.word_en,
-                    'word_kh_type': entry.word_kh_type,
-                    'word_en_type': entry.word_en_type,
-                    'word_kh_definition': entry.word_kh_definition,
-                    'word_en_definition': entry.word_en_definition,
-                    'is_bookmark': 0,
-                    'is_parent': getattr(entry, 'is_parent', False),
-                    'wordRelates': self._get_related_words(entry)
-                } for entry in updated_entries],
+                'entries': serializer.data,
                 'total_entries': updated_entries.count(),
+                'page': 1,
+                'per_page': updated_entries.count(),
+                'total_pages': 1,
                 'last_sync_timestamp': last_sync_timestamp,
                 'current_sync_timestamp': current_sync_timestamp
             }
@@ -1649,176 +1831,9 @@ class DictionarySyncView(APIView):
             })
 
         except Exception as e:
-            logger.error(f"Sync error: {str(e)}")
+            logger.error(f"Sync error: {str(e)}", exc_info=True)
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
                 'message': 'An error occurred during dictionary sync',
                 'data': {}
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def _get_related_words(self, entry):
-        """
-        Retrieve related words for a dictionary entry
-        """
-        related_words = entry.related_words.all() if hasattr(entry, 'related_words') else []
-
-        if not related_words:
-            return None
-
-        return [{
-            'id': word.id,
-            'word_kh': word.word_kh,
-            'word_en': word.word_en,
-            # 'word_kh_type': word.word_kh_type,
-            # 'word_en_type': word.word_en_type,
-            # 'word_kh_definition': word.word_kh_definition,
-            # 'word_en_definition': word.word_en_definition,
-            # 'is_bookmark': 0,
-            # 'is_child': True
-        } for word in related_words]
-
-class DictionarySyncAllView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    @swagger_auto_schema(
-        operation_description="Full Dictionary Synchronization for Mobile App",
-        manual_parameters=[
-            openapi.Parameter(
-                'X-Device-ID',
-                openapi.IN_HEADER,
-                type=openapi.TYPE_STRING,
-                description='Unique Device Identifier',
-                required=True
-            )
-        ],
-        responses={
-            200: openapi.Response(
-                description='Full Dictionary Sync Successful',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(
-                            type=openapi.TYPE_INTEGER,
-                            description='HTTP status code',
-                            example=200
-                        ),
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Sync status message',
-                            example='Full dictionary synced successfully'
-                        ),
-                        'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'entries': openapi.Schema(
-                                    type=openapi.TYPE_ARRAY,
-                                    items=openapi.Schema(
-                                        type=openapi.TYPE_OBJECT,
-                                        properties={
-                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'is_bookmark': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                            'is_parent': openapi.Schema(type=openapi.TYPE_BOOLEAN),
-                                            'wordRelates': openapi.Schema(
-                                                type=['array', 'object'],
-                                                description='Related words or message if no related words'
-                                            )
-                                        }
-                                    )
-                                ),
-                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'last_sync_timestamp': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    format='date-time'
-                                ),
-                                'current_sync_timestamp': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    format='date-time'
-                                )
-                            }
-                        )
-                    }
-                )
-            ),
-            400: openapi.Response(
-                description='Bad Request - Invalid Parameters',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(
-                            type=openapi.TYPE_INTEGER,
-                            description='HTTP status code',
-                            example=400
-                        ),
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Error message',
-                            example='Device ID is required'
-                        ),
-                        'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            nullable=True
-                        )
-                    }
-                )
-            )
-        }
-    )
-    def get(self, request):
-        try:
-            # Get device ID from headers
-            device_id = request.headers.get('X-Device-ID')
-
-            # Validate device ID
-            if not device_id:
-                return Response({
-                    'responseCode': status.HTTP_400_BAD_REQUEST,
-                    'message': 'Device ID is required',
-                    'data': None
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Retrieve all entries with parent words prioritized
-            entries = Dictionary.objects.annotate(
-                parent_priority=Case(
-                    When(is_parent=True, then=Value(0)),
-                    default=Value(1),
-                    output_field=IntegerField()
-                )
-            ).order_by('parent_priority', 'id')
-
-            # Serialize all entries
-            serializer = DictionaryEntrySerializer(
-                entries,
-                many=True,
-                context={'request': request}
-            )
-
-            # Prepare response
-            response_data = {
-                'entries': serializer.data,
-                'total_entries': entries.count(),
-                'last_sync_timestamp': (timezone.now() - timezone.timedelta(minutes=2)).isoformat(),
-                'current_sync_timestamp': timezone.now().isoformat()
-            }
-
-            return Response({
-                'responseCode': status.HTTP_200_OK,
-                'message': 'Full dictionary synced successfully',
-                'data': response_data
-            })
-
-        except Exception as e:
-            # Detailed error logging
-            import traceback
-            logger.error(f"Dictionary Sync Error: {traceback.format_exc()}")
-
-            return Response({
-                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': 'Internal server error',
-                'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

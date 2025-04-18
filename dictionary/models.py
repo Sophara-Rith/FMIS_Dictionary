@@ -185,8 +185,8 @@ class Dictionary(models.Model):
     index = models.IntegerField(unique=True)
 
     # New fields for parent-child relationship
-    is_parent = models.IntegerField(default=0)
-    is_child = models.IntegerField(default=0)
+    is_parent = models.BooleanField(default=False)
+    is_child = models.BooleanField(default=False)
 
     def clean(self):
         if self.is_parent and self.is_child:
@@ -199,7 +199,7 @@ class Dictionary(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['index'],
+                fields=['index', 'word_en'],
                 name='unique_dictionary_index'
             )
         ]
