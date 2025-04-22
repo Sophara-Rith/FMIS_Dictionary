@@ -19,3 +19,183 @@ Traceback (most recent call last):
     )
 RuntimeError: You called this URL via DELETE, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining DELETE data. Change your form to point to 127.0.0.1:9991/api/users/drop/?id=43 (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
 [2025-04-19 00:30:02,009] ERROR basehttp 19132 15544 - "DELETE /api/users/drop?id=43 HTTP/1.1" 500 86697
+[2025-04-21 08:45:22,185] ERROR exception 9920 20516 - Invalid HTTP_HOST header: '172.18.48.1:3030'. You may need to add '172.18.48.1' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.18.48.1:3030'. You may need to add '172.18.48.1' to ALLOWED_HOSTS.
+[2025-04-21 08:45:22,714] ERROR exception 9920 11320 - Invalid HTTP_HOST header: '172.18.48.1:3030'. You may need to add '172.18.48.1' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.18.48.1:3030'. You may need to add '172.18.48.1' to ALLOWED_HOSTS.
+[2025-04-21 08:57:23,675] ERROR exception 192 13168 - Invalid HTTP_HOST header: '172.23.23.48:3030'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:3030'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-21 08:57:24,281] ERROR exception 192 19992 - Invalid HTTP_HOST header: '172.23.23.48:3030'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:3030'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-21 09:10:59,409] ERROR exception 13748 21236 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-21 09:11:00,004] ERROR exception 13748 10824 - Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 128, in __call__
+    response = self.process_request(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 48, in process_request
+    host = request.get_host()
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\http\request.py", line 151, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '172.23.23.48:9991'. You may need to add '172.23.23.48' to ALLOWED_HOSTS.
+[2025-04-21 09:31:12,400] ERROR log 16684 17116 - Internal Server Error: /api/users/drop
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via DELETE, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining DELETE data. Change your form to point to 172.23.23.48:9991/api/users/drop/?id=13 (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-21 09:31:12,403] ERROR basehttp 16684 17116 - "DELETE /api/users/drop?id=13 HTTP/1.1" 500 87214
+[2025-04-21 09:33:26,046] ERROR log 17200 19928 - Internal Server Error: /api/users/drop
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via DELETE, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining DELETE data. Change your form to point to 172.23.23.48:9991/api/users/drop/?id=13 (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-21 09:33:26,049] ERROR basehttp 17200 19928 - "DELETE /api/users/drop?id=13 HTTP/1.1" 500 87214
+[2025-04-21 09:33:55,608] ERROR log 17200 14432 - Internal Server Error: /api/users/drop
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via DELETE, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining DELETE data. Change your form to point to 172.23.23.48:9991/api/users/drop/?id=13 (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-21 09:33:55,611] ERROR basehttp 17200 14432 - "DELETE /api/users/drop?id=13 HTTP/1.1" 500 87214
+[2025-04-21 09:35:55,142] ERROR log 15744 19928 - Internal Server Error: /api/users/drop
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via POST, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining POST data. Change your form to point to 172.23.23.48:9991/api/users/drop/?id=13 (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-21 09:35:55,145] ERROR basehttp 15744 19928 - "POST //api/users/drop?id=13 HTTP/1.1" 500 86518
+[2025-04-21 09:36:50,799] ERROR log 15744 1656 - Internal Server Error: /api/users/drop
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via POST, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining POST data. Change your form to point to 172.23.23.48:9991/api/users/drop/?id=13 (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-21 09:36:50,801] ERROR basehttp 15744 1656 - "POST //api/users/drop?id=13 HTTP/1.1" 500 86518
+[2025-04-21 09:37:12,150] ERROR log 15744 18588 - Internal Server Error: /api/users/drop
+Traceback (most recent call last):
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\utils\deprecation.py", line 131, in __call__
+    response = self.process_response(request, response)
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 108, in process_response
+    return self.response_redirect_class(self.get_full_path_with_slash(request))
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\phara\OneDrive\Desktop\FMIS\python\dictionary_project\venv\Lib\site-packages\django\middleware\common.py", line 87, in get_full_path_with_slash
+    raise RuntimeError(
+    ...<9 lines>...
+    )
+RuntimeError: You called this URL via POST, but the URL doesn't end in a slash and you have APPEND_SLASH set. Django can't redirect to the slash URL while maintaining POST data. Change your form to point to 172.23.23.48:9991/api/users/drop/?id=13 (note the trailing slash), or set APPEND_SLASH=False in your Django settings.
+[2025-04-21 09:37:12,153] ERROR basehttp 15744 18588 - "POST //api/users/drop?id=13 HTTP/1.1" 500 86518
+[2025-04-21 10:39:49,852] ERROR log 21324 9428 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 10:39:49,853] ERROR basehttp 21324 9428 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 10:43:30,216] ERROR log 21324 10172 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 10:43:30,217] ERROR basehttp 21324 10172 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 10:44:35,093] ERROR log 21324 5768 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 10:44:35,095] ERROR basehttp 21324 5768 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 10:46:39,394] ERROR log 21324 20032 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 10:46:39,395] ERROR basehttp 21324 20032 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 10:57:56,323] ERROR log 21324 21392 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 10:57:56,324] ERROR basehttp 21324 21392 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 11:00:37,851] ERROR log 21324 20572 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 11:00:37,853] ERROR basehttp 21324 20572 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 15:10:32,006] ERROR log 21324 19084 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 15:10:32,009] ERROR basehttp 21324 19084 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 15:16:25,063] ERROR log 21324 14764 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 15:16:25,064] ERROR basehttp 21324 14764 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 15:18:40,350] ERROR log 21324 18248 - Internal Server Error: /api/users/mobile/login/
+[2025-04-21 15:18:40,350] ERROR basehttp 21324 18248 - "POST /api/users/mobile/login/ HTTP/1.1" 500 121
+[2025-04-21 16:24:59,142] ERROR log 13764 16380 - Internal Server Error: /api/users/register/
+[2025-04-21 16:24:59,143] ERROR basehttp 13764 16380 - "POST /api/users/register/ HTTP/1.1" 500 128
+[2025-04-21 16:26:33,091] ERROR log 12660 10948 - Internal Server Error: /api/users/register/
+[2025-04-21 16:26:33,092] ERROR basehttp 12660 10948 - "POST /api/users/register/ HTTP/1.1" 500 128
+[2025-04-21 16:26:42,711] ERROR log 12660 10948 - Internal Server Error: /api/users/register/
+[2025-04-21 16:26:42,712] ERROR basehttp 12660 10948 - "POST /api/users/register/ HTTP/1.1" 500 128

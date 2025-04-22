@@ -184,9 +184,26 @@ class Dictionary(models.Model):
     )
     index = models.IntegerField(unique=True)
 
-    # New fields for parent-child relationship
     is_parent = models.BooleanField(default=False)
     is_child = models.BooleanField(default=False)
+
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='deleted_dictionary_entries'
+    )
+
+    def soft_delete(self, user):
+        """
+        Soft delete method to mark entry as deleted
+        """
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.deleted_by = user
+        self.save()
 
     def clean(self):
         if self.is_parent and self.is_child:

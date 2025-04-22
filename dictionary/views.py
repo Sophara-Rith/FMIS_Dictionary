@@ -75,6 +75,32 @@ def process_word_relationships(word_entry):
         word_entry.is_child = False
         word_entry.save()
 
+def track_search_performance(func):
+    @wraps(func)
+    def wrapper(self, request, *args, **kwargs):
+        start_time = time.time()
+        try:
+            response = func(self, request, *args, **kwargs)
+
+            # Log performance metrics
+            execution_time = time.time() - start_time
+            logger.info("Search Performance: %s", {
+                'query': request.query_params.get('query'),
+                'language': request.query_params.get('language', 'ALL'),
+                'execution_time_ms': execution_time * 1000,
+                'result_count': len(response.data.get('results', [])) if hasattr(response, 'data') else 0,
+                'total_results': response.data.get('total_results', 0) if hasattr(response, 'data') else 0
+            })
+
+            return response
+        except Exception as e:
+            logger.error("Search Error: %s", str(e))
+            raise
+    return wrapper
+
+class SearchRateThrottle(UserRateThrottle):
+    scope = 'search'
+
 class DictionaryEntryListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -166,6 +192,335 @@ class DictionaryEntryDetailView(APIView):
                 {'error': 'Dictionary entry not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+class DictionarySearchView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [SearchRateThrottle, AnonRateThrottle]
+
+    DEFAULT_SEARCH_FIELDS = ['word', 'definition', 'example_sentence']
+
+    def get_cache_key(self, query, language, search_fields):
+        key_components = [query, language, ','.join(search_fields)]
+        return f"dict_search_{hashlib.md5(''.join(key_components).encode()).hexdigest()}"
+
+    def build_search_query(self, query, search_fields, language):
+        field_mapping = {
+            'word': ['word_kh', 'word_en'],
+            'definition': ['word_kh_definition', 'word_en_definition'],
+            'example_sentence': ['example_sentence_kh', 'example_sentence_en']
+        }
+
+        search_conditions = []
+
+        for field in search_fields:
+            field_conditions = []
+
+            if language in ['kh', 'ALL']:
+                field_conditions.extend([
+                    Q(**{f'{mapped_field}__icontains': query})
+                    for mapped_field in field_mapping[field] if 'kh' in mapped_field
+                ])
+
+            if language in ['en', 'ALL']:
+                field_conditions.extend([
+                    Q(**{f'{mapped_field}__icontains': query})
+                    for mapped_field in field_mapping[field] if 'en' in mapped_field
+                ])
+
+            if field_conditions:
+                search_conditions.append(reduce(operator.or_, field_conditions))
+
+        return reduce(operator.or_, search_conditions) if search_conditions else Q()
+
+    @swagger_auto_schema(
+        operation_description="Comprehensive Dictionary Search Endpoint",
+        manual_parameters=[
+            openapi.Parameter(
+                name='query',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description='Search term (required)',
+                required=True
+            ),
+            openapi.Parameter(
+                name='language',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description='Language search direction',
+                enum=['kh', 'en', 'ALL'],
+                default='ALL'
+            ),
+            openapi.Parameter(
+                name='search_fields',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Items(
+                    type=openapi.TYPE_STRING,
+                    enum=['word', 'definition', 'example_sentence']
+                ),
+                description='Fields to search (default: word, definition, example_sentence)',
+                default=['word', 'definition', 'example_sentence']
+            ),
+            openapi.Parameter(
+                name='page',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description='Page number for pagination',
+                default=1
+            ),
+            openapi.Parameter(
+                name='per_page',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description='Number of results per page',
+                default=10
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Successful Search Results',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'results': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
+                                        }
+                                    )
+                                ),
+                                'total_results': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'search_query': openapi.Schema(type=openapi.TYPE_STRING),
+                                'search_language': openapi.Schema(type=openapi.TYPE_STRING),
+                                'search_fields': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(type=openapi.TYPE_STRING)
+                                )
+                            }
+                        )
+                    }
+                )
+            ),
+            400: openapi.Response(
+                description='Bad Request',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                    }
+                )
+            )
+        }
+    )
+    @debug_error
+    @track_search_performance
+    def get(self, request):
+        try:
+            # Extract parameters
+            query = request.query_params.get('query', '').strip()
+            language = request.query_params.get('language', 'ALL')
+            search_fields = request.query_params.getlist('search_fields') or self.DEFAULT_SEARCH_FIELDS
+            page = max(1, int(request.query_params.get('page', 1)))
+            per_page = max(1, int(request.query_params.get('per_page', 10)))
+
+            # Validate input
+            if not query:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Search query is required',
+                    'data': {}
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Generate cache key
+            cache_key = self.get_cache_key(query, language, search_fields)
+
+            # Check cache
+            cached_results = cache.get(cache_key)
+            if cached_results:
+                return Response(cached_results)
+
+            # Build search query
+            search_query = self.build_search_query(query, search_fields, language)
+
+            # Perform search
+            entries = Dictionary.objects.filter(search_query)
+
+            # Pagination
+            total_results = entries.count()
+            total_pages = (total_results + per_page - 1) // per_page
+
+            # Apply pagination
+            start = (page - 1) * per_page
+            end = start + per_page
+            paginated_entries = entries[start:end]
+
+            # Prepare response
+            response_data = {
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Dictionary search completed successfully',
+                'data': {
+                    'results': [
+                        {
+                            'id': entry.id,
+                            'word_kh': entry.word_kh,
+                            'word_en': entry.word_en,
+                            'word_kh_type': entry.word_kh_type,
+                            'word_en_type': entry.word_en_type,
+                            'word_kh_definition': entry.word_kh_definition,
+                            'word_en_definition': entry.word_en_definition,
+                            # 'example_sentence_kh': entry.example_sentence_kh or '',
+                            # 'example_sentence_en': entry.example_sentence_en or ''
+                        }
+                        for entry in paginated_entries
+                    ],
+                    'total_results': total_results,
+                    'page': page,
+                    'total_pages': total_pages,
+                    'search_query': query,
+                    'search_language': language,
+                    'search_fields': search_fields
+                }
+            }
+
+            # Cache the response
+            cache.set(cache_key, response_data, timeout=3600)  # Cache for 1 hour
+
+            return Response(response_data)
+
+        except Exception as e:
+            logger.error(f"Search Error: {str(e)}")
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Internal server error during search',
+                'data': {}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class DictionaryDeleteView(APIView):
+    permission_classes = [IsAdminUser]  # Only admin can drop entries
+
+    @swagger_auto_schema(
+        operation_description="Drop dictionary entries by specific ID(s)",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="Comma-separated list of entry IDs to drop",
+                type=openapi.TYPE_STRING,
+                required=True
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Entries successfully dropped',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'total_dropped': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'dropped_ids': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(type=openapi.TYPE_INTEGER)
+                                ),
+                                'failed_ids': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(type=openapi.TYPE_INTEGER)
+                                )
+                            }
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Invalid ID format',
+            403: 'Forbidden - Insufficient permissions',
+            500: 'Internal Server Error'
+        }
+    )
+    def delete(self, request):
+        try:
+            # Get ID parameter
+            id_param = request.query_params.get('id')
+
+            # Validate ID parameter
+            if not id_param:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'ID parameter is required',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Parse IDs, handling both comma-separated and single ID
+            try:
+                # Split and convert to integers, removing any whitespace
+                ids = [int(id.strip()) for id in id_param.split(',') if id.strip()]
+            except ValueError:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid ID format. Must be integer or comma-separated integers',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Prepare lists to track dropped and failed entries
+            dropped_ids = []
+            failed_ids = []
+
+            # Process each ID
+            for entry_id in ids:
+                try:
+                    # Retrieve the dictionary entry
+                    entry = Dictionary.objects.get(id=entry_id)
+
+                    # Perform soft delete
+                    entry.soft_delete(user=request.user)
+                    dropped_ids.append(entry_id)
+
+                except Dictionary.DoesNotExist:
+                    # Track IDs that don't exist
+                    failed_ids.append(entry_id)
+                except Exception as e:
+                    # Log any unexpected errors
+                    logger.error(f"Error dropping entry {entry_id}: {str(e)}")
+                    failed_ids.append(entry_id)
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': f'{len(dropped_ids)} dictionary entries dropped',
+                'data': {
+                    'total_dropped': len(dropped_ids),
+                    'dropped_ids': dropped_ids,
+                    'failed_ids': failed_ids
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Dictionary drop error: {str(e)}", exc_info=True)
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Failed to drop dictionary entries',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class StagingEntryListView(APIView):
     permission_classes = [IsAdminUser]
@@ -706,253 +1061,6 @@ class BookmarkRateThrottle(UserRateThrottle):
         # Use device ID instead of user ID for rate limiting
         device_id = request.headers.get('X-Device-ID')
         return f'throttle_device_{device_id}'
-
-def track_search_performance(func):
-    @wraps(func)
-    def wrapper(self, request, *args, **kwargs):
-        start_time = time.time()
-        try:
-            response = func(self, request, *args, **kwargs)
-
-            # Log performance metrics
-            execution_time = time.time() - start_time
-            logger.info("Search Performance: %s", {
-                'query': request.query_params.get('query'),
-                'language': request.query_params.get('language', 'ALL'),
-                'execution_time_ms': execution_time * 1000,
-                'result_count': len(response.data.get('results', [])) if hasattr(response, 'data') else 0,
-                'total_results': response.data.get('total_results', 0) if hasattr(response, 'data') else 0
-            })
-
-            return response
-        except Exception as e:
-            logger.error("Search Error: %s", str(e))
-            raise
-    return wrapper
-
-class SearchRateThrottle(UserRateThrottle):
-    scope = 'search'
-
-class DictionarySearchView(APIView):
-    permission_classes = [AllowAny]
-    throttle_classes = [SearchRateThrottle, AnonRateThrottle]
-
-    DEFAULT_SEARCH_FIELDS = ['word', 'definition', 'example_sentence']
-
-    def get_cache_key(self, query, language, search_fields):
-        key_components = [query, language, ','.join(search_fields)]
-        return f"dict_search_{hashlib.md5(''.join(key_components).encode()).hexdigest()}"
-
-    def build_search_query(self, query, search_fields, language):
-        field_mapping = {
-            'word': ['word_kh', 'word_en'],
-            'definition': ['word_kh_definition', 'word_en_definition'],
-            'example_sentence': ['example_sentence_kh', 'example_sentence_en']
-        }
-
-        search_conditions = []
-
-        for field in search_fields:
-            field_conditions = []
-
-            if language in ['kh', 'ALL']:
-                field_conditions.extend([
-                    Q(**{f'{mapped_field}__icontains': query})
-                    for mapped_field in field_mapping[field] if 'kh' in mapped_field
-                ])
-
-            if language in ['en', 'ALL']:
-                field_conditions.extend([
-                    Q(**{f'{mapped_field}__icontains': query})
-                    for mapped_field in field_mapping[field] if 'en' in mapped_field
-                ])
-
-            if field_conditions:
-                search_conditions.append(reduce(operator.or_, field_conditions))
-
-        return reduce(operator.or_, search_conditions) if search_conditions else Q()
-
-    @swagger_auto_schema(
-        operation_description="Comprehensive Dictionary Search Endpoint",
-        manual_parameters=[
-            openapi.Parameter(
-                name='query',
-                in_=openapi.IN_QUERY,
-                type=openapi.TYPE_STRING,
-                description='Search term (required)',
-                required=True
-            ),
-            openapi.Parameter(
-                name='language',
-                in_=openapi.IN_QUERY,
-                type=openapi.TYPE_STRING,
-                description='Language search direction',
-                enum=['kh', 'en', 'ALL'],
-                default='ALL'
-            ),
-            openapi.Parameter(
-                name='search_fields',
-                in_=openapi.IN_QUERY,
-                type=openapi.TYPE_ARRAY,
-                items=openapi.Items(
-                    type=openapi.TYPE_STRING,
-                    enum=['word', 'definition', 'example_sentence']
-                ),
-                description='Fields to search (default: word, definition, example_sentence)',
-                default=['word', 'definition', 'example_sentence']
-            ),
-            openapi.Parameter(
-                name='page',
-                in_=openapi.IN_QUERY,
-                type=openapi.TYPE_INTEGER,
-                description='Page number for pagination',
-                default=1
-            ),
-            openapi.Parameter(
-                name='per_page',
-                in_=openapi.IN_QUERY,
-                type=openapi.TYPE_INTEGER,
-                description='Number of results per page',
-                default=10
-            )
-        ],
-        responses={
-            200: openapi.Response(
-                description='Successful Search Results',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'results': openapi.Schema(
-                                    type=openapi.TYPE_ARRAY,
-                                    items=openapi.Schema(
-                                        type=openapi.TYPE_OBJECT,
-                                        properties={
-                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                                            'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
-                                        }
-                                    )
-                                ),
-                                'total_results': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'search_query': openapi.Schema(type=openapi.TYPE_STRING),
-                                'search_language': openapi.Schema(type=openapi.TYPE_STRING),
-                                'search_fields': openapi.Schema(
-                                    type=openapi.TYPE_ARRAY,
-                                    items=openapi.Schema(type=openapi.TYPE_STRING)
-                                )
-                            }
-                        )
-                    }
-                )
-            ),
-            400: openapi.Response(
-                description='Bad Request',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
-                    }
-                )
-            )
-        }
-    )
-    @debug_error
-    @track_search_performance
-    def get(self, request):
-        try:
-            # Extract parameters
-            query = request.query_params.get('query', '').strip()
-            language = request.query_params.get('language', 'ALL')
-            search_fields = request.query_params.getlist('search_fields') or self.DEFAULT_SEARCH_FIELDS
-            page = max(1, int(request.query_params.get('page', 1)))
-            per_page = max(1, int(request.query_params.get('per_page', 10)))
-
-            # Validate input
-            if not query:
-                return Response({
-                    'responseCode': status.HTTP_400_BAD_REQUEST,
-                    'message': 'Search query is required',
-                    'data': {}
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Generate cache key
-            cache_key = self.get_cache_key(query, language, search_fields)
-
-            # Check cache
-            cached_results = cache.get(cache_key)
-            if cached_results:
-                return Response(cached_results)
-
-            # Build search query
-            search_query = self.build_search_query(query, search_fields, language)
-
-            # Perform search
-            entries = Dictionary.objects.filter(search_query)
-
-            # Pagination
-            total_results = entries.count()
-            total_pages = (total_results + per_page - 1) // per_page
-
-            # Apply pagination
-            start = (page - 1) * per_page
-            end = start + per_page
-            paginated_entries = entries[start:end]
-
-            # Prepare response
-            response_data = {
-                'responseCode': status.HTTP_200_OK,
-                'message': 'Dictionary search completed successfully',
-                'data': {
-                    'results': [
-                        {
-                            'id': entry.id,
-                            'word_kh': entry.word_kh,
-                            'word_en': entry.word_en,
-                            'word_kh_type': entry.word_kh_type,
-                            'word_en_type': entry.word_en_type,
-                            'word_kh_definition': entry.word_kh_definition,
-                            'word_en_definition': entry.word_en_definition,
-                            # 'example_sentence_kh': entry.example_sentence_kh or '',
-                            # 'example_sentence_en': entry.example_sentence_en or ''
-                        }
-                        for entry in paginated_entries
-                    ],
-                    'total_results': total_results,
-                    'page': page,
-                    'total_pages': total_pages,
-                    'search_query': query,
-                    'search_language': language,
-                    'search_fields': search_fields
-                }
-            }
-
-            # Cache the response
-            cache.set(cache_key, response_data, timeout=3600)  # Cache for 1 hour
-
-            return Response(response_data)
-
-        except Exception as e:
-            logger.error(f"Search Error: {str(e)}")
-            return Response({
-                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': 'Internal server error during search',
-                'data': {}
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class StagingBulkImportView(APIView):
     parser_classes = (MultiPartParser, FormParser)
@@ -1662,7 +1770,8 @@ class DictionarySyncAllView(APIView):
 
             # Calculate pagination
             # Prioritize parent words, then other entries
-            entries_query = Dictionary.objects.annotate(
+            # Exclude deleted entries
+            entries_query = Dictionary.objects.filter(is_deleted=False).annotate(
                 parent_priority=Case(
                     When(is_parent=True, then=Value(0)),
                     default=Value(1),
@@ -1794,7 +1903,10 @@ class DictionarySyncView(APIView):
 
             # Get updated entries since last sync
             updated_entries = Dictionary.objects.filter(
-                Q(created_at__gt=last_sync_time) | Q(updated_at__gt=last_sync_time)
+                Q(created_at__gt=last_sync_time) |
+                Q(updated_at__gt=last_sync_time) |
+                Q(is_deleted=True, deleted_at__gt=last_sync_time)
+
             ).prefetch_related(
                 Prefetch(
                     'child_words',

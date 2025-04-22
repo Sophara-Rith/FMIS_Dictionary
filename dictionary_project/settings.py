@@ -17,10 +17,49 @@ MOBILE_DEFAULT_PASSWORD = os.getenv('MOBILE_DEFAULT_PASSWORD')
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = [
-    '172.23.23.48',
     'localhost',
     '127.0.0.1',
+    '172.18.48.1',
+    '172.23.23.48'
 ]
+# CORS_ALLOWED_ORIGINS = [
+#     'http://localhost:8012',
+#     'http://127.0.0.1:3030',
+#     'http://172.23.23.48:9991',
+#     'http://localhost',
+#     'http://127.0.0.1'
+# ]
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+CORS_ALLOW_ALL_ORIGINS = True   #Develop stage only
+CORS_ALLOW_CREDENTIALS = True
+
+# CORS Configuration
+# def clean_cors_origins(origins_string):
+#     origins = origins_string.split(',')
+#     return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
+
+# CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
 
 # Custom user model
 AUTH_USER_MODEL = 'users.User'
@@ -160,15 +199,6 @@ MOBILE_JWT_SETTINGS = {
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': False,
 }
-
-CORS_ALLOWED_ORIGINS =os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
-
-# CORS Configuration
-def clean_cors_origins(origins_string):
-    origins = origins_string.split(',')
-    return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
-
-CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
 
 # Swagger config
 SWAGGER_SETTINGS = {

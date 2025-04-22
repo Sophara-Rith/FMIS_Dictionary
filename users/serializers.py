@@ -98,54 +98,59 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'email', 'password',
-            'role', 'phone_number'
+            'username',
+            'email',
+            'password',
+            'role',
+            'sex',
+            'username_kh',
+            'staff_id',
+            'position',
+            'phone_number'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
-            'id': {'read_only': True},
-            'phone_number': {'required': False}
+            'username': {'required': False},
+            'email': {'required': False},
+            'role': {'required': False}
         }
 
-    def validate_password(self, password):
-        """
-        Custom password validation during serializer validation
-        """
-        return PasswordValidator.validate_password(password)
-
     def create(self, validated_data):
-        password = validated_data.pop('password')
+        # Extract and clean phone number
+        phone_number = validated_data.get('phone_number', '')
+        if phone_number:
+            # Format phone number with spaces
+            phone_number = ' '.join([
+                phone_number[:3],
+                phone_number[3:6],
+                phone_number[6:]
+            ])
+            validated_data['phone_number'] = phone_number
 
-        try:
-            PasswordValidator.validate_password(password)
-        except serializers.ValidationError as e:
-            raise serializers.ValidationError({'password': str(e)})
-
+        # Create user
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=password,
-            phone_number=validated_data.get('phone_number')
+            password=validated_data['password'],
+            role=validated_data.get('role', 'USER'),
+            sex=validated_data.get('sex', ''),
+            username_kh=validated_data.get('username_kh', ''),
+            staff_id=validated_data.get('staff_id', ''),
+            position=validated_data.get('position', ''),
+            phone_number=phone_number
         )
+
         return user
 
     def update(self, instance, validated_data):
-        # Password update with validation
-        password = validated_data.get('password')
-
+        # Handle password update separately
+        password = validated_data.pop('password', None)
         if password:
-            # Validate password before updating
-            try:
-                PasswordValidator.validate_password(password)
-            except serializers.ValidationError as e:
-                raise serializers.ValidationError({'password': str(e)})
-
-            # Set new password
             instance.set_password(password)
 
         # Update other fields
-        instance.email = validated_data.get('email', instance.email)
-        instance.phone_number = validated_data.get('phone_number', instance.phone_number)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
 
         instance.save()
         return instance

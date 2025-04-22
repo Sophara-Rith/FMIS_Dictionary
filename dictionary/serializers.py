@@ -160,6 +160,7 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
     word_related = serializers.SerializerMethodField()
     is_bookmark = serializers.SerializerMethodField()
     is_parent = serializers.SerializerMethodField()
+    is_deleted = serializers.SerializerMethodField()
 
     class Meta:
         model = Dictionary
@@ -173,8 +174,33 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             'word_en_definition',
             'is_bookmark',
             'is_parent',
+            'is_deleted',
+            # 'deleted_at',
             'word_related'
         ]
+
+    def get_is_deleted(self, obj):
+        """Convert boolean is_deleted to integer (1 or 0)"""
+        return 1 if obj.is_deleted else 0
+
+    def get_sync_status(self, obj):
+        """
+        Determine sync status of the entry
+        """
+        request = self.context.get('request')
+        last_sync = request.query_params.get('last_sync_timestamp')
+
+        if last_sync:
+            last_sync_time = timezone.datetime.fromisoformat(last_sync)
+
+            if obj.is_deleted and obj.deleted_at > last_sync_time:
+                return 'DELETED'
+            elif obj.created_at > last_sync_time:
+                return 'NEW'
+            elif obj.updated_at > last_sync_time:
+                return 'UPDATED'
+
+        return 'UNCHANGED'
 
     def get_is_parent(self, obj):
         """Convert boolean is_parent to integer (1 or 0)"""

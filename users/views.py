@@ -401,8 +401,14 @@ class UserDetailView(APIView):
 
             # Transform user data to match desired structure
             user_data = {
-                'username': user.username,
+                'id': user.id,
+                'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
+                'username_kh': user.username_kh or '',
+                'sex': user.sex or '',
+                'position': user.position or '',
                 'email': user.email,
+                'phone_number': convert_to_khmer_number(user.phone_number) if user.phone_number else '',
+                'date_joined': convert_to_khmer_date(user.date_joined.strftime('%d-%m-%Y')) if user.date_joined else '',
                 'role': user.role
             }
 
@@ -426,12 +432,17 @@ class UserRegisterView(APIView):
         operation_description="User Registration",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['username', 'email', 'password', 'role'],
+            required=['username', 'email', 'password'],
             properties={
                 'username': openapi.Schema(type=openapi.TYPE_STRING),
                 'email': openapi.Schema(type=openapi.TYPE_STRING),
                 'password': openapi.Schema(type=openapi.TYPE_STRING),
-                'role': openapi.Schema(type=openapi.TYPE_STRING)
+                'role': openapi.Schema(type=openapi.TYPE_STRING),
+                'sex': openapi.Schema(type=openapi.TYPE_STRING),
+                'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
+                'position': openapi.Schema(type=openapi.TYPE_STRING),
+                'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
             }
         ),
         responses={
@@ -442,25 +453,26 @@ class UserRegisterView(APIView):
                     properties={
                         'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
                         'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
-                    }
-                )
-            ),
-            401: openapi.Response(
-                description='Unauthorized',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                'role': openapi.Schema(type=openapi.TYPE_STRING),
+                                'sex': openapi.Schema(type=openapi.TYPE_STRING),
+                                'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
+                                'position': openapi.Schema(type=openapi.TYPE_STRING),
+                                'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
                     }
                 )
             )
         }
     )
     def post(self, request):
-        # Check authentication
+        # Check authentication and authorization
         if not request.user or not request.user.is_authenticated:
             return Response({
                 'responseCode': status.HTTP_401_UNAUTHORIZED,
@@ -468,29 +480,49 @@ class UserRegisterView(APIView):
                 'data': None
             }, status=status.HTTP_401_UNAUTHORIZED)
 
-        # Check authorization
+        # Check authorization to create users
         if request.user.role not in ['ADMIN', 'SUPERUSER']:
             return Response({
                 'responseCode': status.HTTP_403_FORBIDDEN,
-                'message': 'You do not have permission to perform this action',
+                'message': 'You do not have permission to register users',
+                'data': None
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # Validate role creation permissions
+        requested_role = request.data.get('role', 'USER')
+        if request.user.role == 'ADMIN' and requested_role == 'SUPERUSER':
+            return Response({
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'ADMIN cannot create SUPERUSER accounts',
                 'data': None
             }, status=status.HTTP_403_FORBIDDEN)
 
         try:
+            # Validate and create user
             serializer = UserSerializer(data=request.data)
 
             if serializer.is_valid():
                 user = serializer.save()
+
+                # Prepare response data
+                response_data = {
+                    'username': user.username,
+                    'email': user.email,
+                    'role': user.role,
+                    'sex': user.sex or '',
+                    'username_kh': user.username_kh or '',
+                    'staff_id': user.staff_id or '',
+                    'position': user.position or '',
+                    'phone_number': user.phone_number or ''
+                }
+
                 return Response({
                     'responseCode': status.HTTP_201_CREATED,
                     'message': 'User registered successfully',
-                    'data': {
-                        'username': user.username,
-                        'email': user.email,
-                        'role': user.role
-                    }
+                    'data': response_data
                 }, status=status.HTTP_201_CREATED)
 
+            # Handle validation errors
             return Response({
                 'responseCode': status.HTTP_400_BAD_REQUEST,
                 'message': 'Validation error',
@@ -619,13 +651,74 @@ class UserUpdateView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Update User Profile",
+        operation_description="""
+        Update User Profile (Partial Update)
+            Access Levels:
+
+            |- USER:
+            |* Can only update own password
+            |* Cannot specify user ID
+            |-----------------------------------
+            |*** Endpoint: /users/update
+
+            |- ADMIN/SUPERUSER:
+            |* Can update any user's profile
+            |* Can specify user ID to update
+            |* Can modify all fields
+            |-----------------------------------
+            |*** Endpoint: /users/update?id={id}
+        """,
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="User ID to update (Admin Only)",
+                type=openapi.TYPE_INTEGER
+            )
+        ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
-                'username': openapi.Schema(type=openapi.TYPE_STRING),
-                'email': openapi.Schema(type=openapi.TYPE_STRING),
-                'role': openapi.Schema(type=openapi.TYPE_STRING)
+                'password': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="New password (All users)",
+                    format='password'
+                ),
+                # Admin-only fields
+                'username': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Username (Admin Only)"
+                ),
+                'email': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Email address (Admin Only)"
+                ),
+                'role': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="User role (Admin Only)",
+                    enum=['USER', 'ADMIN', 'SUPERUSER']
+                ),
+                'sex': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="User sex (Admin Only)",
+                    enum=['MALE', 'FEMALE', 'OTHER']
+                ),
+                'username_kh': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Khmer username (Admin Only)"
+                ),
+                'staff_id': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Staff ID (Admin Only)"
+                ),
+                'position': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Job position (Admin Only)"
+                ),
+                'phone_number': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Phone number (Admin Only)"
+                )
             }
         ),
         responses={
@@ -634,58 +727,190 @@ class UserUpdateView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description='HTTP status code',
+                            example=200
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description='Update status message',
+                            example='User updated successfully'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'username': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Updated username'
+                                ),
+                                'email': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Updated email'
+                                ),
+                                'role': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='User role'
+                                ),
+                                'sex': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='User sex'
+                                ),
+                                'username_kh': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Khmer username'
+                                ),
+                                'staff_id': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Staff ID'
+                                ),
+                                'position': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Job position'
+                                ),
+                                'phone_number': openapi.Schema(
+                                    type=openapi.TYPE_STRING,
+                                    description='Phone number'
+                                )
+                            }
+                        )
                     }
                 )
             ),
-            401: openapi.Response(
-                description='Unauthorized',
+            400: openapi.Response(
+                description='Validation Error',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=400
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            example='Validation error'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            description='Validation error details'
+                        )
+                    }
+                )
+            ),
+            403: openapi.Response(
+                description='Forbidden',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=403
+                        ),
+                        'message': openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            example='You are not authorized to update other fields'
+                        ),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            nullable=True
+                        )
                     }
                 )
             )
         }
     )
     def put(self, request):
-        # Check authentication
-        if not request.user or not request.user.is_authenticated:
-            return Response({
-                'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Authentication required',
-                'data': None
-            }, status=status.HTTP_401_UNAUTHORIZED)
-
         try:
-            # Find user to update
-            user = request.user
+            # Determine which user to update
+            user_id = request.query_params.get('id')
 
-            # Validate and update user
+            # Regular users can only update themselves
+            if request.user.role not in ['ADMIN', 'SUPERUSER']:
+                # If user tries to specify an ID, deny the request
+                if user_id:
+                    return Response({
+                        'responseCode': status.HTTP_403_FORBIDDEN,
+                        'message': 'You are not authorized to update other user profiles',
+                        'data': None
+                    }, status=status.HTTP_403_FORBIDDEN)
+
+                # Set user to current authenticated user
+                user = request.user
+
+            # Admins can update other users
+            else:
+                # If no ID provided, update current user
+                if not user_id:
+                    user = request.user
+                else:
+                    # Find user by ID
+                    try:
+                        user = User.objects.get(id=user_id)
+                    except User.DoesNotExist:
+                        return Response({
+                            'responseCode': status.HTTP_404_NOT_FOUND,
+                            'message': 'User not found',
+                            'data': None
+                        }, status=status.HTTP_404_NOT_FOUND)
+
+            # Prepare update data
+            update_data = {}
+
+            # Regular users can only update password
+            if request.user.role not in ['ADMIN', 'SUPERUSER']:
+                if 'password' in request.data:
+                    update_data['password'] = request.data['password']
+                else:
+                    return Response({
+                        'responseCode': status.HTTP_403_FORBIDDEN,
+                        'message': 'You are only authorized to update your password',
+                        'data': None
+                    }, status=status.HTTP_403_FORBIDDEN)
+
+            # Admins can update all fields
+            else:
+                # List of fields admins can update
+                allowed_admin_fields = [
+                    'username', 'email', 'password', 'role',
+                    'sex', 'username_kh', 'staff_id',
+                    'position', 'phone_number'
+                ]
+
+                # Collect update data
+                for field in allowed_admin_fields:
+                    if field in request.data:
+                        update_data[field] = request.data[field]
+
+            # Validate and save updates
             serializer = UserSerializer(
                 user,
-                data=request.data,
+                data=update_data,
                 partial=True,
                 context={'request': request}
             )
 
             if serializer.is_valid():
                 updated_user = serializer.save()
+
+                # Prepare response data
+                response_data = {
+                    'username': updated_user.username,
+                    'email': updated_user.email,
+                    'role': updated_user.role,
+                    'sex': updated_user.sex or '',
+                    'username_kh': updated_user.username_kh or '',
+                    'staff_id': updated_user.staff_id or '',
+                    'position': updated_user.position or '',
+                    'phone_number': updated_user.phone_number or ''
+                }
+
                 return Response({
                     'responseCode': status.HTTP_200_OK,
                     'message': 'User updated successfully',
-                    'data': {
-                        'username': updated_user.username,
-                        'email': updated_user.email,
-                        'role': updated_user.role
-                    }
+                    'data': None
                 })
 
+            # Handle validation errors
             return Response({
                 'responseCode': status.HTTP_400_BAD_REQUEST,
                 'message': 'Validation error',

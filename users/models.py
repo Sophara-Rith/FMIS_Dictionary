@@ -14,7 +14,7 @@ def validate_fmis_email(value):
         raise ValidationError('Only FMIS email address is acceptant.')
 
 class UserManager(BaseUserManager):
-    def create_user(self, username, email, password=None, first_name=None, last_name=None, role='USER', phone_number=None):
+    def create_user(self, username, email, password=None, **extra_fields):
         if not email:
             raise ValueError('Users must have an email address')
 
@@ -22,36 +22,47 @@ class UserManager(BaseUserManager):
         validate_fmis_email(email)
 
         # Extract first and last name from email if not provided
-        if not first_name or not last_name:
+        if not extra_fields.get('first_name') or not extra_fields.get('last_name'):
             email_parts = email.split('@')[0].split('.')
             if len(email_parts) >= 2:
-                last_name = email_parts[0].capitalize()
-                first_name = email_parts[1].capitalize()
+                extra_fields['last_name'] = email_parts[0].capitalize()
+                extra_fields['first_name'] = email_parts[1].capitalize()
 
+        # Explicitly handle additional fields
+        role = extra_fields.pop('role', 'USER')
+        sex = extra_fields.pop('sex', '')
+        username_kh = extra_fields.pop('username_kh', '')
+        staff_id = extra_fields.pop('staff_id', '')
+        position = extra_fields.pop('position', '')
+        phone_number = extra_fields.pop('phone_number', '')
+
+        # Create user
         user = self.model(
             username=username,
             email=self.normalize_email(email),
-            first_name=first_name,
-            last_name=last_name,
             role=role,
-            phone_number=phone_number
+            sex=sex,
+            username_kh=username_kh,
+            staff_id=staff_id,
+            position=position,
+            phone_number=phone_number,
+            **extra_fields
         )
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, username, email, password=None):
-        user = self.create_user(
-            username=username,
-            email=email,
-            password=password,
-            role='SUPERUSER'
-        )
-        user.is_admin = True
-        user.is_staff = True
-        user.is_superuser = True
-        user.save(using=self._db)
-        return user
+    # def create_superuser(self, username, email, password=None, **extra_fields):
+    #     extra_fields.setdefault('role', 'SUPERUSER')
+    #     extra_fields.setdefault('is_staff', True)
+    #     extra_fields.setdefault('is_superuser', True)
+
+    #     if extra_fields.get('is_staff') is not True:
+    #         raise ValueError('Superuser must have is_staff=True.')
+    #     if extra_fields.get('is_superuser') is not True:
+    #         raise ValueError('Superuser must have is_superuser=True.')
+
+    #     return self.create_user(username, email, password, **extra_fields)
 
 class User(AbstractBaseUser):
     ROLE_CHOICES = (
