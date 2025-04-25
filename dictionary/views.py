@@ -1070,48 +1070,104 @@ class StagingEntryDetailView(APIView):
 
     @swagger_auto_schema(
         operation_description="Retrieve details of a specific staging entry",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the staging entry",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
         responses={
             200: openapi.Response(
                 description='Successful retrieval of staging entry details',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                        'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                        'review_status': openapi.Schema(type=openapi.TYPE_STRING),
-                        'created_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
-                        'created_by': openapi.Schema(type=openapi.TYPE_STRING)
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                'created_by': openapi.Schema(type=openapi.TYPE_STRING),
+                                'created_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
+                                'review_status': openapi.Schema(type=openapi.TYPE_STRING),
+                                'reviewed_by': openapi.Schema(type=openapi.TYPE_STRING),
+                                'reviewed_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
+                                'rejected_by': openapi.Schema(type=openapi.TYPE_STRING),
+                                'rejected_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time')
+                            }
+                        )
                     }
                 )
             ),
-            404: 'Staging Entry Not Found'
+            400: 'Bad Request',
+            403: 'Forbidden',
+            404: 'Not Found'
         }
     )
-    @debug_error
-    def get(self, request, pk):
+    def get(self, request):
+        # Get the entry ID from query parameters
+        entry_id = request.query_params.get('id')
+
+        if not entry_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Entry ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            staging_entry = Staging.objects.get(pk=pk)
+            # Retrieve the staging entry
+            staging_entry = Staging.objects.select_related(
+                'created_by',
+                'reviewed_by',
+                'rejected_by'
+            ).get(id=entry_id)
 
-            # Check if user is admin or the creator of the entry
-            # if not (request.user.is_staff or
-            #         staging_entry.created_by == request.user):
-            #     return Response(
-            #         {'error': 'You are not authorized to view this entry'},
-            #         status=status.HTTP_403_FORBIDDEN
-            #     )
-
-            serializer = StagingEntrySerializer(staging_entry)
-            return Response(serializer.data)
-        except Staging.DoesNotExist:
-            return Response(
-                {'error': 'Staging entry not found'},
-                status=status.HTTP_404_NOT_FOUND
+            # Check if user is authorized to view the entry
+            is_authorized = (
+                request.user.role in ['ADMIN', 'SUPERUSER'] or
+                staging_entry.created_by == request.user
             )
+
+            if not is_authorized:
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'You are not authorized to view this entry',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Serialize the entry
+            serializer = StagingEntrySerializer(
+                staging_entry,
+                context={'request': request}
+            )
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Staging entry retrieved successfully',
+                'data': serializer.data
+            })
+
+        except Staging.DoesNotExist:
+            return Response({
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'Staging entry not found',
+                'data': None
+            }, status=status.HTTP_404_NOT_FOUND)
 
 class StagingEntryUpdateView(APIView):
     permission_classes = [IsAuthenticated]
