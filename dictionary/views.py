@@ -1,4 +1,5 @@
 # dictionary/views.py
+import math
 import time
 import logging
 from functools import wraps, reduce
@@ -19,6 +20,8 @@ from django.http import FileResponse
 from django.core.cache import cache
 from django.conf import settings
 from django.db.models import Q, Max, Case, When, Value, IntegerField, Prefetch
+
+from users.models import User
 from .models import Dictionary, Staging, Bookmark, WordType, RelatedWord
 from .serializers import (
     DictionaryEntrySerializer,
@@ -333,6 +336,7 @@ class DictionarySearchView(APIView):
     )
     @debug_error
     @track_search_performance
+
     def get(self, request):
         try:
             # Extract parameters
@@ -415,7 +419,7 @@ class DictionarySearchView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class DictionaryDeleteView(APIView):
-    permission_classes = [IsAdminUser]  # Only admin can drop entries
+    permission_classes = [IsAuthenticated]  # Only admin can drop entries
 
     @swagger_auto_schema(
         operation_description="Drop dictionary entries by specific ID(s)",
@@ -458,6 +462,7 @@ class DictionaryDeleteView(APIView):
             500: 'Internal Server Error'
         }
     )
+    @debug_error
     def delete(self, request):
         try:
             # Get ID parameter
@@ -522,35 +527,161 @@ class DictionaryDeleteView(APIView):
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+def generate_next_index():
+    """
+    Generate the next sequential index for Dictionary entries
+    """
+    try:
+        # Get the maximum current index, default to 0 if no entries exist
+        max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
+        return max_index + 1
+    except Exception as e:
+        logger.error(f"Error generating index: {e}")
+        # Fallback mechanism
+        return Dictionary.objects.count() + 1
+
 class StagingEntryListView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated] #change from IsAdminUser
 
     @swagger_auto_schema(
-        operation_description="List all staging entries pending approval",
+        operation_description="List staging entries with user-specific filtering",
+        manual_parameters=[
+            openapi.Parameter(
+                'user_id',
+                openapi.IN_QUERY,
+                description="Filter staging entries by user ID",
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                'review_status',
+                openapi.IN_QUERY,
+                description="Filter by review status",
+                type=openapi.TYPE_STRING,
+                enum=['PENDING', 'APPROVED', 'REJECTED']
+            ),
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number for pagination",
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of items per page",
+                type=openapi.TYPE_INTEGER
+            )
+        ],
         responses={
             200: openapi.Response(
                 description='Successful retrieval of staging entries',
                 schema=openapi.Schema(
-                    type=openapi.TYPE_ARRAY,
-                    items=openapi.Schema(
-                        type=openapi.TYPE_OBJECT,
-                        properties={
-                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                            'word': openapi.Schema(type=openapi.TYPE_STRING),
-                            'definition': openapi.Schema(type=openapi.TYPE_STRING),
-                            'submitted_by': openapi.Schema(type=openapi.TYPE_STRING),
-                            'created_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
-                        }
-                    )
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'entries': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT
+                                    )
+                                ),
+                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
+                            }
+                        )
+                    }
                 )
-            )
+            ),
+            400: 'Bad Request',
+            403: 'Forbidden'
         }
     )
     @debug_error
     def get(self, request):
-        entries = Staging.objects.all()
-        serializer = StagingEntrySerializer(entries, many=True)
-        return Response(serializer.data)
+        # Get query parameters
+        user_id = request.query_params.get('id')  # Changed from 'user_id' to 'id'
+        review_status = request.query_params.get('review_status')
+        page = int(request.query_params.get('page', 1))
+        per_page = int(request.query_params.get('per_page', 25))
+
+        # Validate and prepare user filtering
+        try:
+            # If user_id is provided, ensure proper access
+            if user_id:
+                user_id = int(user_id)
+
+                # Check if the requested user matches the current user
+                # or if the current user is an ADMIN/SUPERUSER
+                if (user_id != request.user.id and
+                    request.user.role not in ['ADMIN', 'SUPERUSER']):
+                    return Response({
+                        'responseCode': status.HTTP_403_FORBIDDEN,
+                        'message': 'You are not authorized to view this user\'s entries',
+                        'data': None
+                    }, status=status.HTTP_403_FORBIDDEN)
+
+                # Find the user by ID to get the username
+                try:
+                    target_user = User.objects.get(id=user_id)
+                except User.DoesNotExist:
+                    return Response({
+                        'responseCode': status.HTTP_400_BAD_REQUEST,
+                        'message': 'User not found',
+                        'data': None
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        except (TypeError, ValueError):
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Invalid user ID format',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Base queryset
+        entries = Staging.objects.all().order_by('-created_at')
+
+        # Apply user filter by username (not ID)
+        if user_id:
+            entries = entries.filter(created_by__username_kh=target_user.username_kh)
+
+        # Apply review_status filter
+        if review_status:
+            entries = entries.filter(review_status=review_status)
+
+        # Pagination
+        total_entries = entries.count()
+        total_pages = math.ceil(total_entries / per_page)
+
+        # Slice entries for current page
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_entries = entries[start:end]
+
+        # Serialize entries
+        serializer = StagingEntrySerializer(
+            paginated_entries,
+            many=True,
+            context={'request': request}
+        )
+
+        # Prepare response
+        response_data = {
+            'responseCode': status.HTTP_200_OK,
+            'message': 'Staging entries retrieved successfully',
+            'data': {
+                'entries': serializer.data,
+                'total_entries': total_entries,
+                'page': page,
+                'total_pages': total_pages
+            }
+        }
+
+        return Response(response_data)
 
 class StagingEntryCreateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -639,210 +770,219 @@ class StagingEntryCreateView(APIView):
         )
 
         if serializer.is_valid():
-            # If ADMIN/SUPERUSER, create directly in Dictionary
+            # Prepare data for staging entry
+            staging_data = serializer.validated_data.copy()
+
+            # Determine review status and related fields
             if is_admin_or_superuser:
-                try:
-                    # Check for existing entry
-                    existing_entry = Dictionary.objects.filter(
-                        Q(word_en=serializer.validated_data.get('word_en'))
-                    ).first()
-
-                    if existing_entry:
-                        return Response({
-                            'responseCode': status.HTTP_400_BAD_REQUEST,
-                            'message': 'The entry already exists',
-                            'data': None
-                        }, status=status.HTTP_400_BAD_REQUEST)
-
-                    # Generate next index
-                    next_index = self._generate_unique_index()
-
-                    # Create Dictionary entry directly
-                    dictionary_entry = Dictionary.objects.create(
-                        index=next_index,
-                        word_kh=serializer.validated_data.get('word_kh'),
-                        word_en=serializer.validated_data.get('word_en'),
-                        word_kh_type=serializer.validated_data.get('word_kh_type'),
-                        word_en_type=serializer.validated_data.get('word_en_type'),
-                        word_kh_definition=serializer.validated_data.get('word_kh_definition'),
-                        word_en_definition=serializer.validated_data.get('word_en_definition'),
-                        pronunciation_kh=serializer.validated_data.get('pronunciation_kh', ''),
-                        pronunciation_en=serializer.validated_data.get('pronunciation_en', ''),
-                        example_sentence_kh=serializer.validated_data.get('example_sentence_kh', ''),
-                        example_sentence_en=serializer.validated_data.get('example_sentence_en', ''),
-                        created_by=request.user,
-                        is_parent=False,
-                        is_child=False
-                    )
-
-                    # Process word relationships
-                    process_word_relationships(dictionary_entry)
-
-                    # Prepare response data
-                    # response_data = {
-                    #     'id': dictionary_entry.id,
-                    #     'word_kh': dictionary_entry.word_kh,
-                    #     'word_en': dictionary_entry.word_en,
-                    #     'is_parent': dictionary_entry.is_parent,
-                    #     'is_child': dictionary_entry.is_child
-                    # }
-
-                    return Response({
-                        'responseCode': status.HTTP_201_CREATED,
-                        'message': 'Dictionary entry created directly',
-                        'data': None
-                    }, status=status.HTTP_201_CREATED)
-
-                except Exception as e:
-                    return Response({
-                        'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        'message': f'Failed to create dictionary entry: {str(e)}',
-                        'data': None
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            # For non-admin users, create in Staging
+                # For ADMIN/SUPERUSER: Automatically approve
+                review_status = 'APPROVED'
+                reviewed_by = request.user
+                reviewed_at = timezone.now()
             else:
-                # Check for existing entry in Staging
+                # For regular users: Default to PENDING
+                review_status = 'PENDING'
+                reviewed_by = None
+                reviewed_at = None
+
+            # Create staging entry
+            try:
+                # Check for existing entry in staging
                 existing_staging_entry = Staging.objects.filter(
-                    Q(word_en=serializer.validated_data.get('word_en'))
+                    Q(word_en=staging_data.get('word_en')) &
+                    Q(word_kh=staging_data.get('word_kh'))
                 ).first()
 
                 if existing_staging_entry:
                     return Response({
                         'responseCode': status.HTTP_400_BAD_REQUEST,
-                        'message': 'The entry already exists',
-                        'data': {
-                            'id': existing_staging_entry.id,
-                            'word_kh': existing_staging_entry.word_kh,
-                            'word_en': existing_staging_entry.word_en,
-                            'review_status': existing_staging_entry.review_status
-                        }
+                        'message': 'An entry with this word already exists in staging',
+                        'data': None
                     }, status=status.HTTP_400_BAD_REQUEST)
 
-                # Save staging entry with default parent/child values
-                staging_entry = serializer.save(
+                # Create staging entry
+                staging_entry = Staging.objects.create(
+                    **staging_data,
                     created_by=request.user,
-                    is_parent=False,
-                    is_child=False,
-                    review_status='PENDING'
+                    review_status=review_status,
+                    reviewed_by=reviewed_by,
+                    reviewed_at=reviewed_at,
+                    is_parent=False,  # Initial state
+                    is_child=False   # Initial state
                 )
 
-                # Process potential word relationships for staging
+                # Process word relationships for staging entry
                 self._process_staging_word_relationships(staging_entry)
 
-                # Refresh the serializer data to include updated fields
-                updated_serializer = StagingEntrySerializer(staging_entry)
+                # If ADMIN/SUPERUSER, also create in Dictionary
+                if is_admin_or_superuser:
+                    dictionary_entry = self._create_dictionary_entry_from_staging(
+                        staging_entry,
+                        request.user
+                    )
 
+                    return Response({
+                        'responseCode': status.HTTP_201_CREATED,
+                        'message': 'Dictionary entry created successfully',
+                        'data': None
+                    }, status=status.HTTP_201_CREATED)
+
+                # For non-admin users
                 return Response({
                     'responseCode': status.HTTP_201_CREATED,
                     'message': 'Staging entry created successfully',
-                    'data': updated_serializer.data
+                    'data': {
+                        'id': staging_entry.id,
+                        'review_status': review_status
+                    }
                 }, status=status.HTTP_201_CREATED)
 
+            except Exception as e:
+                return Response({
+                    'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    'message': f'Error creating entry: {str(e)}',
+                    'data': None
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Validation errors
         return Response({
             'responseCode': status.HTTP_400_BAD_REQUEST,
             'message': 'Invalid data',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    def _generate_unique_index(self):
-        """Generate a unique index for Dictionary entries"""
-        max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
-        return max_index + 1
-
     def _process_staging_word_relationships(self, staging_entry):
         """
-        Process word relationships for staging entries
-        Similar to the method in the previous implementation
+        Process word relationships for staging entry
         """
-        # Split the word_en to check if it contains multiple words
         words = staging_entry.word_en.split()
 
+        # Single word scenario
         if len(words) == 1:
-            # Single word - mark as parent
             staging_entry.is_parent = True
             staging_entry.is_child = False
             staging_entry.save()
             return
 
-        # Multiple words - check if any exist in dictionary
+        # Multi-word scenario
         staging_entry.is_parent = False
 
-        # Look for potential parent words
+        # Check for potential parent words in Dictionary
         potential_parents = Dictionary.objects.filter(
-            word_en__in=words,
-            is_parent=True
-        ).distinct()
+            Q(word_en__in=words) & Q(is_parent=True)
+        )
 
         if potential_parents.exists():
-            # This word is a child of existing parent words
+            # This is likely a compound or derived word
             staging_entry.is_child = True
-            staging_entry.save()
         else:
-            # No parents found, this could be a new parent word
-            staging_entry.is_child = False
-            staging_entry.save()
+            # No existing parent words found
+            staging_entry.is_parent = len(words) > 1
 
-def generate_next_index():
-    """
-    Generate the next sequential index for Dictionary entries
-    """
-    try:
-        # Get the maximum current index, default to 0 if no entries exist
+        staging_entry.save()
+
+    def _create_dictionary_entry_from_staging(self, staging_entry, user):
+        """
+        Create Dictionary entry from Staging entry for ADMIN/SUPERUSER
+        """
+        # Generate next index
+        next_index = generate_next_index()
+
+        # Create Dictionary entry
+        dictionary_entry = Dictionary.objects.create(
+            index=next_index,
+            word_kh=staging_entry.word_kh,
+            word_en=staging_entry.word_en,
+            word_kh_type=staging_entry.word_kh_type,
+            word_en_type=staging_entry.word_en_type,
+            word_kh_definition=staging_entry.word_kh_definition,
+            word_en_definition=staging_entry.word_en_definition,
+            pronunciation_kh=staging_entry.pronunciation_kh,
+            pronunciation_en=staging_entry.pronunciation_en,
+            example_sentence_kh=staging_entry.example_sentence_kh,
+            example_sentence_en=staging_entry.example_sentence_en,
+            created_by=user,
+            is_parent=staging_entry.is_parent,
+            is_child=staging_entry.is_child
+        )
+
+        # Process word relationships
+        process_word_relationships(dictionary_entry)
+
+        return dictionary_entry
+
+    def _generate_unique_index(self):
+        """Generate a unique index for Dictionary entries"""
         max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
         return max_index + 1
-    except Exception as e:
-        logger.error(f"Error generating index: {e}")
-        # Fallback mechanism
-        return Dictionary.objects.count() + 1
 
 class StagingEntryApproveView(APIView):
-    def post(self, request, pk):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Approve a staging entry",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the staging entry to approve",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
+        responses={
+            200: 'Successfully approved',
+            403: 'Forbidden',
+            404: 'Not found'
+        }
+    )
+    @debug_error
+    def post(self, request):
+        # Get the entry ID from query parameters
+        entry_id = request.query_params.get('id')
+
+        if not entry_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Entry ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             # Retrieve the staging entry
-            staging_entry = Staging.objects.get(id=pk)
+            staging_entry = Staging.objects.get(id=entry_id)
 
-            # Generate next index
-            next_index = self._generate_unique_index()
+            # Check permissions
+            if request.user.role not in ['ADMIN', 'SUPERUSER']:
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'You are not authorized to approve this entry',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
 
-            # Create Dictionary entry
-            dictionary_entry = Dictionary.objects.create(
-                index=next_index,
-                word_kh=staging_entry.word_kh,
-                word_en=staging_entry.word_en,
-                word_kh_type=staging_entry.word_kh_type,
-                word_en_type=staging_entry.word_en_type,
-                word_kh_definition=staging_entry.word_kh_definition,
-                word_en_definition=staging_entry.word_en_definition,
-                created_by=request.user,
-                # Don't set is_parent/is_child yet - will be determined by process_word_relationships
-                is_parent=False,
-                is_child=False
-            )
-
-            # Process word relationships
-            process_word_relationships(dictionary_entry)
-
-            # Update staging entry status
+            # Approve the entry
             staging_entry.review_status = 'APPROVED'
             staging_entry.reviewed_by = request.user
             staging_entry.reviewed_at = timezone.now()
             staging_entry.save()
 
+            # Create Dictionary entry
+            dictionary_entry = self._create_dictionary_entry_from_staging(staging_entry)
+
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Staging entry approved successfully',
                 'data': {
-                    'id': dictionary_entry.id,
-                    'is_parent': dictionary_entry.is_parent,
-                    'is_child': dictionary_entry.is_child
+                    'staging_id': staging_entry.id,
+                    'dictionary_id': dictionary_entry.id
                 }
             })
 
         except Staging.DoesNotExist:
             return Response({
                 'responseCode': status.HTTP_404_NOT_FOUND,
-                'message': 'Staging entry not found'
+                'message': 'Staging entry not found',
+                'data': None
             }, status=status.HTTP_404_NOT_FOUND)
 
     def _generate_unique_index(self):
@@ -850,44 +990,80 @@ class StagingEntryApproveView(APIView):
         return max_index + 1
 
 class StagingEntryRejectView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         operation_description="Reject a staging entry",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the staging entry to reject",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
-                'reason': openapi.Schema(
+                'rejection_reason': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="Reason for rejection"
+                    description='Reason for rejecting the entry'
                 )
             }
         ),
         responses={
-            200: 'Staging entry rejected successfully',
-            404: 'Staging Entry Not Found'
+            200: 'Successfully rejected',
+            403: 'Forbidden',
+            404: 'Not found'
         }
     )
     @debug_error
-    def post(self, request, pk):
+    def post(self, request):
+        # Get the entry ID from query parameters
+        entry_id = request.query_params.get('id')
+
+        if not entry_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Entry ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            staging_entry = Staging.objects.get(pk=pk)
+            # Retrieve the staging entry
+            staging_entry = Staging.objects.get(id=entry_id)
 
-            # Optional: Log rejection reason
-            reason = request.data.get('reason', 'No reason provided')
+            # Check permissions
+            if request.user.role not in ['ADMIN', 'SUPERUSER']:
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'You are not authorized to reject this entry',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
 
-            # Delete staging entry
-            staging_entry.delete()
+            # Reject the entry
+            staging_entry.review_status = 'REJECTED'
+            staging_entry.rejected_by = request.user
+            staging_entry.rejected_at = timezone.now()
+            staging_entry.rejection_reason = request.data.get('rejection_reason', '')
+            staging_entry.save()
 
             return Response({
-                'message': 'Entry rejected and deleted',
-                'reason': reason
-            }, status=status.HTTP_200_OK)
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Staging entry rejected successfully',
+                'data': {
+                    'id': staging_entry.id,
+                    'review_status': staging_entry.review_status
+                }
+            })
+
         except Staging.DoesNotExist:
-            return Response(
-                {'error': 'Staging entry not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'Staging entry not found',
+                'data': None
+            }, status=status.HTTP_404_NOT_FOUND)
 
 class StagingEntryDetailView(APIView):
     permission_classes = [IsAuthenticated]
@@ -922,12 +1098,12 @@ class StagingEntryDetailView(APIView):
             staging_entry = Staging.objects.get(pk=pk)
 
             # Check if user is admin or the creator of the entry
-            if not (request.user.is_staff or
-                    staging_entry.created_by == request.user):
-                return Response(
-                    {'error': 'You are not authorized to view this entry'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+            # if not (request.user.is_staff or
+            #         staging_entry.created_by == request.user):
+            #     return Response(
+            #         {'error': 'You are not authorized to view this entry'},
+            #         status=status.HTTP_403_FORBIDDEN
+            #     )
 
             serializer = StagingEntrySerializer(staging_entry)
             return Response(serializer.data)
@@ -942,116 +1118,137 @@ class StagingEntryUpdateView(APIView):
 
     @swagger_auto_schema(
         operation_description="Update a staging entry",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                'word_en': openapi.Schema(type=openapi.TYPE_STRING),
-                'word_kh_type': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    enum=[choice[0] for choice in WordType.WORD_TYPE_CHOICES_KH]
-                ),
-                'word_en_type': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    enum=[choice[0] for choice in WordType.WORD_TYPE_CHOICES_EN]
-                ),
-                'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
-                'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
-                'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
-            }
-        ),
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the staging entry to update",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
+        request_body=StagingEntryCreateSerializer,
         responses={
-            200: 'Staging entry updated successfully',
+            200: 'Successfully updated',
             400: 'Validation error',
-            403: 'Unauthorized',
-            404: 'Staging entry not found'
+            403: 'Forbidden',
+            404: 'Not found'
         }
     )
     @debug_error
-    def put(self, request, pk):
+    def put(self, request):
+        # Get the entry ID from query parameters
+        entry_id = request.query_params.get('id')
+
+        if not entry_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Entry ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            staging_entry = Staging.objects.get(pk=pk)
+            # Retrieve the staging entry
+            staging_entry = Staging.objects.get(id=entry_id)
 
-            # Only allow updates by the creator or admin
-            if not (request.user.is_staff or
-                    staging_entry.created_by == request.user):
-                return Response(
-                    {'error': 'You are not authorized to update this entry'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+            # Check permissions
+            if (staging_entry.created_by != request.user and
+                request.user.role not in ['ADMIN', 'SUPERUSER']):
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'You are not authorized to update this entry',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
 
-            # Prevent updates to approved or rejected entries
-            if staging_entry.review_status != 'PENDING':
-                return Response(
-                    {'error': 'Cannot update non-pending entries'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
+            # Validate and update
             serializer = StagingEntryCreateSerializer(
                 staging_entry,
                 data=request.data,
-                partial=True,
-                context={'request': request}
+                partial=True
             )
 
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data)
+                return Response({
+                    'responseCode': status.HTTP_200_OK,
+                    'message': 'Staging entry updated successfully',
+                    'data': serializer.data
+                })
 
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Validation error',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         except Staging.DoesNotExist:
-            return Response(
-                {'error': 'Staging entry not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'Staging entry not found',
+                'data': None
+            }, status=status.HTTP_404_NOT_FOUND)
 
 class StagingEntryDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         operation_description="Delete a staging entry",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the staging entry to delete",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
         responses={
-            204: 'Staging entry deleted successfully',
-            403: 'Unauthorized to delete',
-            404: 'Staging entry not found'
+            204: 'Successfully deleted',
+            403: 'Forbidden',
+            404: 'Not found'
         }
     )
     @debug_error
-    def delete(self, request, pk):
+    def delete(self, request):
+        # Get the entry ID from query parameters
+        entry_id = request.query_params.get('id')
+
+        if not entry_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Entry ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            staging_entry = Staging.objects.get(pk=pk)
+            # Retrieve the staging entry
+            staging_entry = Staging.objects.get(id=entry_id)
 
-            # Only allow deletion by the creator or admin
-            if not (request.user.is_staff or
-                    staging_entry.created_by == request.user):
-                return Response(
-                    {'error': 'You are not authorized to delete this entry'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+            # Check permissions
+            if (staging_entry.created_by != request.user and
+                request.user.role not in ['ADMIN', 'SUPERUSER']):
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'You are not authorized to delete this entry',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
 
-            # Prevent deletion of non-pending entries
-            if staging_entry.review_status != 'PENDING':
-                return Response(
-                    {'error': 'Cannot delete non-pending entries'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
+            # Delete the entry
             staging_entry.delete()
-            return Response(
-                {'message': 'Staging entry deleted successfully'},
-                status=status.HTTP_204_NO_CONTENT
-            )
+
+            return Response({
+                'responseCode': status.HTTP_204_NO_CONTENT,
+                'message': 'Staging entry deleted successfully',
+                'data': None
+            }, status=status.HTTP_204_NO_CONTENT)
+
         except Staging.DoesNotExist:
-            return Response(
-                {'error': 'Staging entry not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'Staging entry not found',
+                'data': None
+            }, status=status.HTTP_404_NOT_FOUND)
+
 
 class BookmarkRateThrottle(UserRateThrottle):
     """
@@ -1264,6 +1461,7 @@ class StagingBulkImportView(APIView):
 class ImportStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @debug_error
     def get(self, request, task_id):
         try:
             # Retrieve import status from cache
@@ -1290,6 +1488,7 @@ class ImportStatusView(APIView):
 class DictionaryTemplateDownloadView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @debug_error
     def get(self, request):
         """
         Generate and provide downloadable Excel template
@@ -1400,6 +1599,7 @@ class BookmarkView(APIView):
             )
         }
     )
+    @debug_error
     def get(self, request):
         try:
             # Get device ID from request headers
@@ -1762,7 +1962,7 @@ class DictionarySyncAllView(APIView):
 
             # Pagination parameters
             page = max(1, int(request.GET.get('page', 1)))
-            per_page = max(1, min(int(request.GET.get('per_page', 20)), 100))  # Limit max per_page to 100
+            per_page = max(1, min(int(request.GET.get('per_page', 100)), 100))
 
             # Get all bookmarked word IDs for this device in one query
             bookmarked_ids = set(Bookmark.objects.filter(device_id=device_id)

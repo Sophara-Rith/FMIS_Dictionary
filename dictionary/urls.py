@@ -26,22 +26,22 @@ urlpatterns = [
     # Staging Entries Routes
     path('staging/list/', StagingEntryListView.as_view(), name='staging-entry-list'),
     path('staging/create/', StagingEntryCreateView.as_view(), name='staging-entry-create'),
-    path('staging/<int:pk>/', StagingEntryDetailView.as_view(), name='staging-entry-detail'),
-    path('staging/<int:pk>/update/', StagingEntryUpdateView.as_view(), name='staging-entry-update'),
-    path('staging/<int:pk>/delete/', StagingEntryDeleteView.as_view(), name='staging-entry-delete'),
+    path('staging/detail/', StagingEntryDetailView.as_view(), name='staging-entry-detail'),
 
-    path('staging/<int:pk>/approve/', StagingEntryApproveView.as_view(), name='staging-entry-approve'),
-    path('staging/<int:pk>/reject/', StagingEntryRejectView.as_view(), name='staging-entry-reject'),
+    # Updated routes with explicit id parameter
+    path('staging/update/', StagingEntryUpdateView.as_view(), name='staging-entry-update'),
+    path('staging/drop/', StagingEntryDeleteView.as_view(), name='staging-entry-delete'),
+    path('staging/approve/', StagingEntryApproveView.as_view(), name='staging-entry-approve'),
+    path('staging/reject/', StagingEntryRejectView.as_view(), name='staging-entry-reject'),
 
     path('bookmarks/', BookmarkView.as_view(), name='bookmarks'),
 
-    path('sync_all', DictionarySyncAllView.as_view(), name='dictionary_sync_all'),
-    path('sync', DictionarySyncView.as_view(), name='dictionary_sync'),
+    path('sync_all/', DictionarySyncAllView.as_view(), name='dictionary_sync_all'),
+    path('sync/', DictionarySyncView.as_view(), name='dictionary_sync'),
 
     path('search/', DictionarySearchView.as_view(), name='dictionary-search'),
 
     path('staging/bulk_input/', StagingBulkImportView.as_view(), name='staging-bulk-import'),
-    #path('staging/import_status/<str:task_id>/', ImportStatusView.as_view(), name='import-status'),
 
     path('template/', DictionaryTemplateDownloadView.as_view(), name='dictionary-template-download')
 ]

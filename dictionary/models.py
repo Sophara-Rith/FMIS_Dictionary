@@ -143,6 +143,33 @@ verbose_name='English Word Definition'
         default='PENDING'
     )
 
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='rejected_staging_entries',
+        null=True,
+        blank=True
+    )
+    rejection_reason = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name='Reason for Rejection',
+        validators=[
+            MinLengthValidator(10, "Rejection reason must be at least 10 characters long")
+        ]
+    )
+
+    def reject(self, user, reason):
+        """
+        Method to handle rejection of staging entry
+        """
+        self.review_status = 'REJECTED'
+        self.rejected_at = timezone.now()
+        self.rejected_by = user
+        self.rejection_reason = reason
+        self.save()
+
     is_parent = models.BooleanField(default=False)
     is_child = models.BooleanField(default=False)
 
@@ -187,14 +214,15 @@ class Dictionary(models.Model):
     is_parent = models.BooleanField(default=False)
     is_child = models.BooleanField(default=False)
 
-    is_deleted = models.BooleanField(default=False)
-    deleted_at = models.DateTimeField(null=True, blank=True)
     deleted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         related_name='deleted_dictionary_entries'
     )
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     def soft_delete(self, user):
         """

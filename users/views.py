@@ -104,6 +104,30 @@ def convert_to_khmer_date(date_str):
         # If conversion fails, return original string
         return date_str
 
+def format_phone_number(phone_number):
+    """
+    Format phone number by splitting into groups of 3 digits
+    """
+    # Remove any existing spaces or non-digit characters
+    cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
+
+    # Handle different phone number lengths
+    if len(cleaned_number) < 9:
+        return cleaned_number  # Return original if too short
+
+    # Different formatting based on number length
+    if len(cleaned_number) == 9:
+        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
+    elif len(cleaned_number) == 10:
+        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
+    else:
+        return ' '.join([
+            cleaned_number[:3],  # First 3 digits
+            cleaned_number[3:6],  # Next 3 digits
+            cleaned_number[6:]    # Remaining digits
+        ])
+
+
 class UserLoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -188,6 +212,7 @@ class UserLoginView(APIView):
                         'refresh': str(refresh),
                         'access': str(refresh.access_token),
                         'user': {
+                            'id': user.id,
                             'username': user.username,
                             'username_kh': user.username_kh or '',
                             'email': user.email,
@@ -287,10 +312,14 @@ class UserListView(APIView):
             role = request.query_params.get('role')
             is_active = request.query_params.get('is_active')
 
-            # Base queryset with soft delete filter
-            users = User.objects.filter(is_deleted=False)
+            # Base queryset with soft delete filter and exclude specific email
+            users = User.objects.filter(
+                is_deleted=False
+            ).exclude(
+                email='fmis369@fmis.gov.kh'
+            )
 
-            # Apply filters if provided
+            # Apply additional filters if provided
             if role:
                 users = users.filter(role=role)
 
@@ -371,6 +400,7 @@ class UserDetailView(APIView):
             )
         }
     )
+    @debug_error
     def get(self, request):
         user_id = request.query_params.get('id')
         username = request.query_params.get('username')
@@ -432,9 +462,8 @@ class UserRegisterView(APIView):
         operation_description="User Registration",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['username', 'email', 'password'],
+            required=['email', 'password'],
             properties={
-                'username': openapi.Schema(type=openapi.TYPE_STRING),
                 'email': openapi.Schema(type=openapi.TYPE_STRING),
                 'password': openapi.Schema(type=openapi.TYPE_STRING),
                 'role': openapi.Schema(type=openapi.TYPE_STRING),
@@ -471,6 +500,7 @@ class UserRegisterView(APIView):
             )
         }
     )
+    @debug_error
     def post(self, request):
         # Check authentication and authorization
         if not request.user or not request.user.is_authenticated:
@@ -497,6 +527,21 @@ class UserRegisterView(APIView):
                 'data': None
             }, status=status.HTTP_403_FORBIDDEN)
 
+        # Validate email domain and extract username
+        email = request.data.get('email', '')
+        if not email or not email.endswith('@fmis.gov.kh'):
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Invalid email. Must be a FMIS email address',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extract username from email
+        username = email.split('@')[0]
+
+        # Add username to request data
+        request.data['username'] = username
+
         try:
             # Validate and create user
             serializer = UserSerializer(data=request.data)
@@ -506,7 +551,7 @@ class UserRegisterView(APIView):
 
                 # Prepare response data
                 response_data = {
-                    'username': user.username,
+                    'username': username,
                     'email': user.email,
                     'role': user.role,
                     'sex': user.sex or '',
@@ -571,6 +616,7 @@ class UserDropView(APIView):
             )
         }
     )
+    @debug_error
     def delete(self, request):
         # Check authentication
         if not request.user or not request.user.is_authenticated:
@@ -634,11 +680,7 @@ class UserDropView(APIView):
 
             user.soft_delete()
 
-            return Response({
-                'responseCode': status.HTTP_200_OK,
-                'message': 'User deleted successfully',
-                'data': None
-            })
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
         except Exception as e:
             return Response({
@@ -819,6 +861,7 @@ class UserUpdateView(APIView):
             )
         }
     )
+    @debug_error
     def put(self, request):
         try:
             # Determine which user to update
@@ -833,10 +876,8 @@ class UserUpdateView(APIView):
                         'message': 'You are not authorized to update other user profiles',
                         'data': None
                     }, status=status.HTTP_403_FORBIDDEN)
-
                 # Set user to current authenticated user
                 user = request.user
-
             # Admins can update other users
             else:
                 # If no ID provided, update current user
@@ -859,7 +900,15 @@ class UserUpdateView(APIView):
             # Regular users can only update password
             if request.user.role not in ['ADMIN', 'SUPERUSER']:
                 if 'password' in request.data:
-                    update_data['password'] = request.data['password']
+                    # Only add password to update_data if it's different from the current password
+                    if not user.check_password(request.data['password']):
+                        update_data['password'] = request.data['password']
+                    else:
+                        return Response({
+                            'responseCode': status.HTTP_400_BAD_REQUEST,
+                            'message': 'New password must be different from the current password',
+                            'data': None
+                        }, status=status.HTTP_400_BAD_REQUEST)
                 else:
                     return Response({
                         'responseCode': status.HTTP_403_FORBIDDEN,
@@ -876,10 +925,26 @@ class UserUpdateView(APIView):
                     'position', 'phone_number'
                 ]
 
-                # Collect update data
+                # Collect update data, only if the value is different from the current value
                 for field in allowed_admin_fields:
                     if field in request.data:
-                        update_data[field] = request.data[field]
+                        current_value = getattr(user, field, None)
+
+                        # Special handling for password
+                        if field == 'password':
+                            if not user.check_password(request.data[field]):
+                                update_data[field] = request.data[field]
+                        # For other fields, compare directly
+                        elif str(request.data[field]) != str(current_value or ''):
+                            update_data[field] = request.data[field]
+
+                # If no changes, return a message
+                if not update_data:
+                    return Response({
+                        'responseCode': status.HTTP_200_OK,
+                        'message': 'No changes detected',
+                        'data': None
+                    }, status=status.HTTP_200_OK)
 
             # Validate and save updates
             serializer = UserSerializer(
@@ -907,7 +972,7 @@ class UserUpdateView(APIView):
                 return Response({
                     'responseCode': status.HTTP_200_OK,
                     'message': 'User updated successfully',
-                    'data': None
+                    'data': response_data
                 })
 
             # Handle validation errors
@@ -1020,6 +1085,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             )
         }
     )
+    @debug_error
     def post(self, request, *args, **kwargs):
         try:
             # Override the request data to use login_input
@@ -1120,6 +1186,7 @@ class CustomTokenRefreshView(TokenRefreshView):
             )
         }
     )
+    @debug_error
     def post(self, request, *args, **kwargs):
         try:
             # Call parent method to get new tokens
@@ -1206,6 +1273,7 @@ class CustomTokenBlacklistView(TokenBlacklistView):
             )
         }
     )
+    @debug_error
     def post(self, request, *args, **kwargs):
         try:
             # Validate refresh token is present
@@ -1358,7 +1426,7 @@ class MobileLoginView(APIView):
             )
         }
     )
-
+    @debug_error
     def post(self, request):
         # Specific mobile login credentials
         MOBILE_LOGIN_USERNAME = 'fmis369'

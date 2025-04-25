@@ -8,14 +8,17 @@ class StagingEntryAdmin(admin.ModelAdmin):
         'word_kh', 'word_en',
         'word_kh_type', 'word_en_type',
         'review_status',
-        'created_at', 'created_by'
+        'created_at', 'created_by',
+        'rejected_at',
+        'rejected_by'
     ]
     list_filter = [
         'review_status',
         'word_kh_type',
-        'word_en_type'
+        'word_en_type',
+        'rejected_at'
     ]
-    search_fields = ['word_kh', 'word_en']
+    search_fields = ['word_kh', 'word_en', 'rejection_reason']
 
 @admin.register(Dictionary)
 class DictionaryEntryAdmin(admin.ModelAdmin):

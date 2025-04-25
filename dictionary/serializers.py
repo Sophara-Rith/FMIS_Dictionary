@@ -1,8 +1,9 @@
 # dictionary/serializers.py
 from rest_framework import serializers
-from .models import RelatedWord, Staging, Dictionary, WordType, Bookmark
 from django.utils import timezone
 from django.db.models import Q
+from .models import RelatedWord, Staging, Dictionary, WordType, Bookmark
+from users.views import convert_to_khmer_date
 
 class StagingDictionaryEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
@@ -54,22 +55,62 @@ class StagingDictionaryEntrySerializer(serializers.ModelSerializer):
 class StagingEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
     reviewed_by = serializers.SerializerMethodField()
+    reviewed_at = serializers.SerializerMethodField()
+    created_at = serializers.SerializerMethodField()
+    rejected_by = serializers.SerializerMethodField(required=False, allow_null=True)
+    rejected_at = serializers.SerializerMethodField()
+    review_status = serializers.CharField(read_only=True)
 
     class Meta:
         model = Staging
-        fields = '__all__'
+        fields = [
+            'id',
+            'word_kh',
+            'word_kh_type',
+            'word_kh_definition',
+            'pronunciation_kh',
+            'example_sentence_kh',
+            'word_en',
+            'word_en_type',
+            'word_en_definition',
+            'pronunciation_en',
+            'example_sentence_en',
+            'created_by',
+            'created_at',
+            'reviewed_by',
+            'reviewed_at',
+            'review_status',
+            'rejected_by',
+            'rejected_at'
+        ]
         read_only_fields = [
             'created_at',
-            'review_status',
             'created_by',
-            'reviewed_by'
+            'reviewed_at',
+            'reviewed_by',
+            'review_status',
+            'rejected_at',
+            'rejected_by',
+            'rejection_reason'
         ]
 
     def get_created_by(self, obj):
-        return obj.created_by.username if obj.created_by else None
+        return obj.created_by.username_kh if obj.created_by else None
+
+    def get_created_at(self, obj):
+        return convert_to_khmer_date(obj.created_at.strftime('%d-%m-%Y')) if obj.created_at else None
 
     def get_reviewed_by(self, obj):
-        return obj.reviewed_by.username if obj.reviewed_by else None
+        return obj.reviewed_by.username_kh if obj.reviewed_by else None
+
+    def get_reviewed_at(self, obj):
+        return convert_to_khmer_date(obj.reviewed_at.strftime('%d-%m-%Y')) if obj.reviewed_at else None
+
+    def get_rejected_by(self, obj):
+        return obj.rejected_by.username if obj.rejected_by else None
+
+    def get_rejected_at(self, obj):
+        return convert_to_khmer_date(obj.rejected_at.strftime('%d-%m-%Y')) if obj.rejected_at else None
 
 class StagingEntryCreateSerializer(serializers.ModelSerializer):
     class Meta:
@@ -178,6 +219,9 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             # 'deleted_at',
             'word_related'
         ]
+        extra_kwargs = {
+            'deleted_by': {'required': False}
+        }
 
     def get_is_deleted(self, obj):
         """Convert boolean is_deleted to integer (1 or 0)"""

@@ -2,8 +2,33 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
+from django.db.models import Max
 import re
 from .models import User
+
+def format_phone_number(phone_number):
+    """
+    Format phone number by splitting into groups of 3 digits
+    """
+    # Remove any existing spaces or non-digit characters
+    cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
+
+    # Handle different phone number lengths
+    if len(cleaned_number) < 9:
+        return cleaned_number  # Return original if too short
+
+    # Different formatting based on number length
+    if len(cleaned_number) == 9:
+        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
+    elif len(cleaned_number) == 10:
+        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
+    else:
+        return ' '.join([
+            cleaned_number[:3],  # First 3 digits
+            cleaned_number[3:6],  # Next 3 digits
+            cleaned_number[6:]    # Remaining digits
+        ])
+
 
 class LoginSerializer(serializers.Serializer):
     """
@@ -94,6 +119,64 @@ class PasswordValidator:
 
         return password
 
+class StaffIDGenerator:
+    @classmethod
+    def generate_next_staff_id(cls):
+        """
+        Generate the next staff ID in the format: ប.គ.ហ - XXXX
+
+        Example sequence:
+        - ប.គ.ហ - 0001
+        - ប.គ.ហ - 0002
+        - ប.គ.ហ - 0003
+        """
+        # Get the maximum existing staff ID
+        max_staff_id = User.objects.filter(
+            staff_id__regex=r'^ប\.គ\.ហ - \d{4}$'
+        ).aggregate(
+            Max('staff_id')
+        )['staff_id__max']
+
+        # If no existing staff ID, start from 0001
+        if not max_staff_id:
+            return 'ប.គ.ហ - 0001'
+
+        # Extract the numeric part and increment
+        try:
+            # Split the existing staff ID and get the numeric part
+            current_number = int(max_staff_id.split('-')[-1].strip())
+            next_number = current_number + 1
+
+            # Format the new staff ID with leading zeros
+            return f'ប.គ.ហ - {next_number:04d}'
+
+        except (ValueError, IndexError):
+            # Fallback to a default if parsing fails
+            return 'ប.គ.ហ - 0001'
+
+    def format_phone_number(phone_number):
+        """
+        Format phone number by splitting into groups of 3 digits
+        """
+        # Remove any existing spaces or non-digit characters
+        cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
+
+        # Handle different phone number lengths
+        if len(cleaned_number) < 9:
+            return cleaned_number  # Return original if too short
+
+        # Different formatting based on number length
+        if len(cleaned_number) == 9:
+            return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
+        elif len(cleaned_number) == 10:
+            return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
+        else:
+            return ' '.join([
+                cleaned_number[:3],  # First 3 digits
+                cleaned_number[3:6],  # Next 3 digits
+                cleaned_number[6:]    # Remaining digits
+            ])
+
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -104,53 +187,114 @@ class UserSerializer(serializers.ModelSerializer):
             'role',
             'sex',
             'username_kh',
-            'staff_id',
             'position',
-            'phone_number'
+            'phone_number',
+            'staff_id',
+            'first_name',
+            'last_name'
         ]
         extra_kwargs = {
             'password': {'write_only': True},
             'username': {'required': False},
-            'email': {'required': False},
-            'role': {'required': False}
+            'email': {'required': True},
+            'role': {'required': False},
+            'staff_id': {'read_only': True},
         }
 
+    def validate_email(self, email):
+        """
+        Validate email domain
+        """
+        if not email.endswith('@fmis.gov.kh'):
+            raise serializers.ValidationError("Only FMIS email addresses are allowed")
+        return email
+
+    def validate_password(self, password):
+        """
+        Validate password complexity
+        """
+        return PasswordValidator.validate_password(password)
+
+    def validate_phone_number(self, phone_number):
+        """
+        Validate and format phone number
+        """
+        if not phone_number:
+            return phone_number
+
+        # Remove non-digit characters
+        cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
+
+        # Validate number length and format
+        if not cleaned_number:
+            raise serializers.ValidationError("Phone number must contain digits")
+
+        return format_phone_number(phone_number)
+
     def create(self, validated_data):
-        # Extract and clean phone number
-        phone_number = validated_data.get('phone_number', '')
+        # Extract username from email
+        email = validated_data.get('email', '')
+        username = email.split('@')[0] if email else ''
+        validated_data['username'] = username
+
+        # Generate staff ID automatically
+        staff_id = StaffIDGenerator.generate_next_staff_id()
+        validated_data['staff_id'] = staff_id
+
+        # Format phone number if provided
+        phone_number = validated_data.get('phone_number')
         if phone_number:
-            # Format phone number with spaces
-            phone_number = ' '.join([
-                phone_number[:3],
-                phone_number[3:6],
-                phone_number[6:]
-            ])
-            validated_data['phone_number'] = phone_number
+            validated_data['phone_number'] = format_phone_number(phone_number)
+
+        # Set default role if not provided
+        role = validated_data.get('role', 'USER')
+        validated_data['role'] = role
+
+        # Extract first and last name from email if not provided
+        if not validated_data.get('first_name') or not validated_data.get('last_name'):
+            email_parts = email.split('@')[0].split('.')
+            if len(email_parts) >= 2:
+                validated_data['last_name'] = email_parts[0].capitalize()
+                validated_data['first_name'] = email_parts[1].capitalize()
 
         # Create user
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password'],
-            role=validated_data.get('role', 'USER'),
-            sex=validated_data.get('sex', ''),
-            username_kh=validated_data.get('username_kh', ''),
-            staff_id=validated_data.get('staff_id', ''),
-            position=validated_data.get('position', ''),
-            phone_number=phone_number
-        )
-
+        user = User.objects.create_user(**validated_data)
         return user
 
     def update(self, instance, validated_data):
-        # Handle password update separately
-        password = validated_data.pop('password', None)
+        # Password update with validation
+        password = validated_data.get('password')
         if password:
-            instance.set_password(password)
+            try:
+                # Validate password before updating
+                validated_password = PasswordValidator.validate_password(password)
+
+                # Additional check: Prevent using previous passwords
+                if instance.check_password(password):
+                    raise serializers.ValidationError(
+                        "New password must be different from the current password."
+                    )
+
+                # Set new password using validated password
+                instance.set_password(validated_password)
+            except serializers.ValidationError as e:
+                raise serializers.ValidationError({'password': str(e)})
 
         # Update other fields
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+        instance.email = validated_data.get('email', instance.email)
+        instance.role = validated_data.get('role', instance.role)
+        instance.sex = validated_data.get('sex', instance.sex)
+        instance.username_kh = validated_data.get('username_kh', instance.username_kh)
+        instance.position = validated_data.get('position', instance.position)
+
+        # Format and update phone number
+        phone_number = validated_data.get('phone_number')
+        if phone_number:
+            instance.phone_number = format_phone_number(phone_number)
+
+        # Update first and last name
+        instance.first_name = validated_data.get('first_name', instance.first_name)
+        instance.last_name = validated_data.get('last_name', instance.last_name)
 
         instance.save()
         return instance

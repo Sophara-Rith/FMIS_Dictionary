@@ -68,7 +68,7 @@ def insert_dictionary_data(json_file_path, api_url, auth_token):
 # Usage
 if __name__ == '__main__':
     JSON_FILE_PATH = 'testData.json'
-    API_URL = 'http://127.0.0.1:9991/api/dictionary/staging/create/'
-    AUTH_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQ0OTYxOTAyLCJpYXQiOjE3NDQ5NTgzMDIsImp0aSI6ImE5MzViMTNhZTJmNjRlOGVhYjMyYzBjZWQ4NDhmYzUyIiwidXNlcl9pZCI6NX0.1QkNZ_oW4OxhVjPLV1yxJfcMR2yuMoW17AfF-A9jqo0'
+    API_URL = 'http://127.0.0.1:3030/api/dictionary/staging/create/'
+    AUTH_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQ1MzczNjk1LCJpYXQiOjE3NDUzNzAwOTUsImp0aSI6IjJlY2I2MDk2MDAzMzQyM2RiZjllNzU3ODJiM2MwMjJhIiwidXNlcl9pZCI6MjB9.sjGDcTpKtdcVucbkJ92nB-eTF89BbXkcZP5rgVS-2MA'
 
     insert_dictionary_data(JSON_FILE_PATH, API_URL, AUTH_TOKEN)
