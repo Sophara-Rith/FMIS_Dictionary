@@ -1,0 +1,14 @@
+.env
+dictionary/migrations/00*.py
+users/migrations/00*.py
+media/import_templates/dictionary_import_template_*.xlsx
+
+approve.py
+error_debug.log
+failed_insertions.json
+gen.py
+import.py
+security_logs.log
+testData.json
+
+
