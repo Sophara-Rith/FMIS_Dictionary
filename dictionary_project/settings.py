@@ -147,9 +147,10 @@ AUTH_PASSWORD_VALIDATORS = [
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'users.custom_auth.DeviceSpecificJWTAuthentication',
+        'users.custom_auth.MobileDeviceJWTAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
+    'EXCEPTION_HANDLER': 'users.exceptions.custom_exception_handler',
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
@@ -185,19 +186,19 @@ CACHES = {
     }
 }
 
-# JWT Token Configuration
+# Use for general purpose exclude mobile version
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('ACCESS_TOKEN_LIFETIME', 60))),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('REFRESH_TOKEN_LIFETIME', 1))),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
 }
-
+# exclusively use only for mobile version processing
 MOBILE_JWT_SETTINGS = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=3),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=3),
-    'ROTATE_REFRESH_TOKENS': False,
-    'BLACKLIST_AFTER_ROTATION': False,
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=int(os.getenv('MOBILE_ACCESS_TOKEN_LIFETIME', 3))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('MOBILE_REFRESH_TOKEN_LIFETIME', 3))),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 # Swagger config
@@ -213,7 +214,7 @@ SWAGGER_SETTINGS = {
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Phnom_Penh'
 USE_I18N = True
 USE_TZ = True
 

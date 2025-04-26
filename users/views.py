@@ -1,6 +1,9 @@
 # users/views.py
+from datetime import datetime, timedelta
 import logging
+import traceback
 from venv import logger
+from zoneinfo import ZoneInfo
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -11,6 +14,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from debug_utils import debug_error
 from .models import MobileDevice, User
@@ -1436,6 +1440,8 @@ class MobileLoginView(APIView):
         device_id = request.data.get('device_id')
         login_input = request.data.get('login_input')
         password = request.data.get('password')
+        device_name = request.data.get('device_name', '')
+        device_type = request.data.get('device_type', '')
 
         # Validate required parameters
         if not all([device_id, login_input, password]):
@@ -1455,6 +1461,10 @@ class MobileLoginView(APIView):
             }, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
+            # Explicitly import User model
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+
             # Find or create mobile user
             user, created = User.objects.get_or_create(
                 username=MOBILE_LOGIN_USERNAME,
@@ -1469,38 +1479,94 @@ class MobileLoginView(APIView):
                 user.set_password(MOBILE_LOGIN_PASSWORD)
                 user.save()
 
-            # Create or update mobile device
-            mobile_device, device_created = MobileDevice.objects.get_or_create(
+            # Generate tokens with custom method for precise control
+            access_token, refresh_token, token_expires_at = self.generate_mobile_tokens(user, device_id)
+
+            # Remove existing devices with the same device_id
+            MobileDevice.objects.filter(device_id=device_id).delete()
+
+            # Use UTC+7 for logging and other timestamp operations
+            utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
+            current_time = datetime.now(utc_plus_7)
+
+            # Create mobile device with UTC+7 timestamp
+            mobile_device = MobileDevice.objects.create(
+                user=user,
                 device_id=device_id,
-                defaults={
-                    'user': user,
-                    'is_active': True
-                }
+                device_name=device_name,
+                device_type=device_type,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                is_active=True,
+                token_created_at=current_time,
+                token_expires_at=token_expires_at,
+                last_activity_at=current_time
             )
-
-            # Generate mobile-specific tokens with 3-day lifetime
-            from rest_framework_simplejwt.tokens import RefreshToken
-            refresh = RefreshToken.for_user(user)
-
-            # Optional: Add custom claims
-            refresh['device_id'] = device_id
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Mobile login successful',
                 'data': {
-                    'refresh': str(refresh),
-                    'access': str(refresh.access_token),
+                    'refresh': refresh_token,
+                    'access': access_token,
                     'device_id': device_id,
+                    'device_name': device_name,
+                    'device_type': device_type,
+                    'token_expires_at': token_expires_at.isoformat(),  # ISO format for consistent representation
+                    'current_time': current_time.isoformat()
                 }
             })
 
         except Exception as e:
+            # Comprehensive error logging
+            logger.error(f"Mobile Login Error: {str(e)}")
+            logger.error(f"Error Details: {traceback.format_exc()}")
+
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
                 'message': 'Mobile login failed',
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @staticmethod
+    def generate_mobile_tokens(user, device_id):
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from django.conf import settings
+        from zoneinfo import ZoneInfo
+        from datetime import datetime, timedelta
+
+        # Use mobile-specific JWT settings
+        mobile_settings = settings.MOBILE_JWT_SETTINGS
+
+        # Create refresh token with mobile-specific lifetime
+        refresh = RefreshToken.for_user(user)
+
+        # Temporarily override token lifetimes for mobile
+        original_access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
+        original_refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
+
+        try:
+            # Override with mobile-specific settings
+            settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'] = mobile_settings['ACCESS_TOKEN_LIFETIME']
+            settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'] = mobile_settings['REFRESH_TOKEN_LIFETIME']
+
+            # Add custom claims
+            refresh['device_id'] = device_id
+
+            # Calculate token expiration in UTC+7
+            utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
+            token_expires_at = datetime.now(utc_plus_7) + mobile_settings['ACCESS_TOKEN_LIFETIME']
+
+            # Convert tokens to strings
+            access_token = str(refresh.access_token)
+            refresh_token = str(refresh)
+
+            return access_token, refresh_token, token_expires_at
+
+        finally:
+            # Restore original JWT settings
+            settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'] = original_access_lifetime
+            settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'] = original_refresh_lifetime
 
 class PublicTestEndpoint(APIView):
     permission_classes = [AllowAny]  # No authentication required

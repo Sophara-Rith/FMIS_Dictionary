@@ -3,7 +3,30 @@ import os
 import uuid
 import pandas as pd
 from django.conf import settings
-from .models import WordType
+from .models import WordType, ActivityLog
+
+def log_activity(user, action, word_kh=None, word_en=None):
+    """
+    Log user activities focusing on username_kh
+
+    :param user: User performing the action
+    :param action: Action type from ActivityLog.ACTIONS
+    :param word_kh: Khmer word involved in the action
+    :param word_en: English word involved in the action
+    """
+    try:
+        # Create activity log using username_kh
+        ActivityLog.objects.create(
+            user=user,
+            username_kh=user.username_kh or user.username,  # Fallback to username if username_kh is not set
+            action=action,
+            role=user.role,
+            word_kh=word_kh,
+            word_en=word_en
+        )
+    except Exception as e:
+        # Log any errors in logging (optional)
+        print(f"Error logging activity: {e}")
 
 class DictionaryTemplateGenerator:
     @classmethod

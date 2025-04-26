@@ -1,4 +1,5 @@
 # users/models.py
+from zoneinfo import ZoneInfo
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import models
 from django.contrib.auth import get_user_model
@@ -142,16 +143,53 @@ class MobileDevice(models.Model):
         related_name='mobile_devices'
     )
     device_id = models.CharField(max_length=255, unique=True)
+    device_name = models.CharField(max_length=255, null=True, blank=True)
+    device_type = models.CharField(max_length=100, null=True, blank=True)
 
-    device_name = models.TextField(null=True, blank=True)
-    device_type = models.TextField(null=True, blank=True)
-
-    # Store individual tokens for each device
     access_token = models.TextField(null=True, blank=True)
     refresh_token = models.TextField(null=True, blank=True)
 
     token_created_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+
+    # Add token expiration fields
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    last_activity_at = models.DateTimeField(null=True, blank=True)
+
+    def is_token_valid(self):
+        """
+        Check if the token is still valid
+        """
+        if not self.token_expires_at:
+            return False
+
+        return timezone.now() < self.token_expires_at
+
+    def deactivate(self):
+        """
+        Deactivate the device
+        """
+        self.is_active = False
+        self.save()
+
+    def update_activity(self):
+        """
+        Update last activity timestamp
+        """
+        self.last_activity_at = timezone.now()
+        self.save()
+
+    def save(self, *args, **kwargs):
+        # Ensure timestamps are in UTC+7
+        utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
+
+        if not self.token_created_at:
+            self.token_created_at = timezone.now().astimezone(utc_plus_7)
+
+        if not self.last_activity_at:
+            self.last_activity_at = timezone.now().astimezone(utc_plus_7)
+
+        super().save(*args, **kwargs)
 
     def generate_device_tokens(self, user):
         """

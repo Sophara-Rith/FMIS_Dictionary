@@ -31,7 +31,7 @@ from .serializers import (
 )
 from debug_utils import debug_error
 from .tasks import process_staging_bulk_import
-from .utils import DictionaryTemplateGenerator
+from .utils import DictionaryTemplateGenerator, log_activity
 from dictionary import models
 
 logger = logging.getLogger(__name__)
@@ -166,35 +166,118 @@ class DictionaryEntryDetailView(APIView):
 
     @swagger_auto_schema(
         operation_description="Retrieve a specific dictionary entry by ID",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the dictionary entry",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
         responses={
             200: openapi.Response(
                 description='Successful retrieval of dictionary entry',
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'word': openapi.Schema(type=openapi.TYPE_STRING),
-                        'definition': openapi.Schema(type=openapi.TYPE_STRING),
-                        'language': openapi.Schema(type=openapi.TYPE_STRING),
-                        'examples': openapi.Schema(type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(type=openapi.TYPE_STRING)),
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                                'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                'related_words': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'parents': openapi.Schema(
+                                            type=openapi.TYPE_ARRAY,
+                                            items=openapi.Schema(
+                                                type=openapi.TYPE_OBJECT,
+                                                properties={
+                                                    'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                                    'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                                    'relationship_type': openapi.Schema(type=openapi.TYPE_STRING)
+                                                }
+                                            )
+                                        ),
+                                        'children': openapi.Schema(
+                                            type=openapi.TYPE_ARRAY,
+                                            items=openapi.Schema(
+                                                type=openapi.TYPE_OBJECT,
+                                                properties={
+                                                    'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                                    'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                                    'relationship_type': openapi.Schema(type=openapi.TYPE_STRING)
+                                                }
+                                            )
+                                        )
+                                    }
+                                )
+                            }
+                        )
                     }
                 )
             ),
+            400: 'Bad Request',
             404: 'Entry Not Found'
         }
     )
     @debug_error
-    def get(self, request, pk):
+    def get(self, request):
+        # Get the entry ID from query parameters
+        entry_id = request.query_params.get('id')
+
+        if not entry_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Entry ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            entry = Dictionary.objects.get(pk=pk)
-            serializer = DictionaryEntrySerializer(entry)
-            return Response(serializer.data)
-        except Dictionary.DoesNotExist:
-            return Response(
-                {'error': 'Dictionary entry not found'},
-                status=status.HTTP_404_NOT_FOUND
+            # Retrieve the dictionary entry with related words
+            entry = Dictionary.objects.prefetch_related(
+                Prefetch(
+                    'child_words',
+                    queryset=RelatedWord.objects.select_related('child_word'),
+                    to_attr='prefetched_child_words'
+                ),
+                Prefetch(
+                    'parent_words',
+                    queryset=RelatedWord.objects.select_related('parent_word'),
+                    to_attr='prefetched_parent_words'
+                )
+            ).get(id=entry_id)
+
+            # Serialize the entry
+            serializer = DictionaryEntrySerializer(
+                entry,
+                context={'request': request}
             )
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Dictionary entry retrieved successfully',
+                'data': serializer.data
+            })
+
+        except Dictionary.DoesNotExist:
+            return Response({
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'Dictionary entry not found',
+                'data': None
+            }, status=status.HTTP_404_NOT_FOUND)
 
 class DictionarySearchView(APIView):
     permission_classes = [AllowAny]
@@ -827,6 +910,14 @@ class StagingEntryCreateView(APIView):
                         'data': None
                     }, status=status.HTTP_201_CREATED)
 
+                # Log the activity using username_kh
+                log_activity(
+                    user=request.user,
+                    action='STAGING_CREATE',
+                    word_kh=staging_entry.word_kh,
+                    word_en=staging_entry.word_en
+                )
+
                 # For non-admin users
                 return Response({
                     'responseCode': status.HTTP_201_CREATED,
@@ -937,6 +1028,7 @@ class StagingEntryApproveView(APIView):
         }
     )
     @debug_error
+    @debug_error
     def post(self, request):
         # Get the entry ID from query parameters
         entry_id = request.query_params.get('id')
@@ -960,22 +1052,27 @@ class StagingEntryApproveView(APIView):
                     'data': None
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            # Approve the entry
+            # Create Dictionary entry
+            dictionary_entry = self._create_dictionary_entry_from_staging(staging_entry, request.user)
+
+            # Update staging entry status
             staging_entry.review_status = 'APPROVED'
             staging_entry.reviewed_by = request.user
             staging_entry.reviewed_at = timezone.now()
             staging_entry.save()
 
-            # Create Dictionary entry
-            dictionary_entry = self._create_dictionary_entry_from_staging(staging_entry)
+            # Log the activity
+            log_activity(
+                user=request.user,
+                action='STAGING_APPROVE',
+                word_kh=staging_entry.word_kh,
+                word_en=staging_entry.word_en
+            )
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Staging entry approved successfully',
-                'data': {
-                    'staging_id': staging_entry.id,
-                    'dictionary_id': dictionary_entry.id
-                }
+                'data': None
             })
 
         except Staging.DoesNotExist:
@@ -985,9 +1082,73 @@ class StagingEntryApproveView(APIView):
                 'data': None
             }, status=status.HTTP_404_NOT_FOUND)
 
+    def _create_dictionary_entry_from_staging(self, staging_entry, user):
+        """
+        Create Dictionary entry from Staging entry
+
+        :param staging_entry: Staging entry to convert
+        :param user: User creating the dictionary entry
+        :return: Created Dictionary entry
+        """
+        # Generate next index
+        next_index = self._generate_unique_index()
+
+        # Determine parent-child status
+        is_parent = self._determine_parent_status(staging_entry)
+        is_child = not is_parent
+
+        # Create Dictionary entry
+        dictionary_entry = Dictionary.objects.create(
+            index=next_index,
+            word_kh=staging_entry.word_kh,
+            word_en=staging_entry.word_en,
+            word_kh_type=staging_entry.word_kh_type,
+            word_en_type=staging_entry.word_en_type,
+            word_kh_definition=staging_entry.word_kh_definition,
+            word_en_definition=staging_entry.word_en_definition,
+            pronunciation_kh=staging_entry.pronunciation_kh,
+            pronunciation_en=staging_entry.pronunciation_en,
+            example_sentence_kh=staging_entry.example_sentence_kh,
+            example_sentence_en=staging_entry.example_sentence_en,
+            created_by=user,
+            is_parent=is_parent,
+            is_child=is_child
+        )
+
+        return dictionary_entry
+
     def _generate_unique_index(self):
+        """
+        Generate a unique index for Dictionary entries
+
+        :return: Next unique index
+        """
         max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
         return max_index + 1
+
+    def _determine_parent_status(self, staging_entry):
+        """
+        Determine if the entry should be marked as a parent word
+
+        :param staging_entry: Staging entry to check
+        :return: Boolean indicating if the entry is a parent word
+        """
+        # Split words to check complexity
+        words = staging_entry.word_en.split()
+
+        # Single word scenario
+        if len(words) == 1:
+            return True
+
+        # Multi-word scenario
+        # Check if any of the words are existing parent words
+        existing_parent_words = Dictionary.objects.filter(
+            word_en__in=words,
+            is_parent=True
+        )
+
+        # If no existing parent words found, this could be a parent
+        return not existing_parent_words.exists()
 
 class StagingEntryRejectView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1005,15 +1166,19 @@ class StagingEntryRejectView(APIView):
         ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
+            required=['reason'],
             properties={
-                'rejection_reason': openapi.Schema(
+                'reason': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description='Reason for rejecting the entry'
+                    description='Reason for rejecting the entry',
+                    minLength=10,  # Minimum length to ensure meaningful reason
+                    maxLength=500  # Optional: set a maximum length
                 )
             }
         ),
         responses={
             200: 'Successfully rejected',
+            400: 'Invalid reason',
             403: 'Forbidden',
             404: 'Not found'
         }
@@ -1023,10 +1188,28 @@ class StagingEntryRejectView(APIView):
         # Get the entry ID from query parameters
         entry_id = request.query_params.get('id')
 
+        # Validate entry ID
         if not entry_id:
             return Response({
                 'responseCode': status.HTTP_400_BAD_REQUEST,
                 'message': 'Entry ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extract and validate rejection reason
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Rejection reason is required and cannot be empty',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate reason length
+        if len(reason) < 10:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Rejection reason must be at least 10 characters long',
                 'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1042,19 +1225,28 @@ class StagingEntryRejectView(APIView):
                     'data': None
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            # Reject the entry
+            # Update staging entry status
             staging_entry.review_status = 'REJECTED'
-            staging_entry.rejected_by = request.user
-            staging_entry.rejected_at = timezone.now()
-            staging_entry.rejection_reason = request.data.get('rejection_reason', '')
+            staging_entry.reviewed_by = request.user
+            staging_entry.reviewed_at = timezone.now()
+            staging_entry.rejection_reason = reason
             staging_entry.save()
+
+            # Log the activity
+            log_activity(
+                user=request.user,
+                action='STAGING_REJECT',
+                word_kh=staging_entry.word_kh,
+                word_en=staging_entry.word_en
+            )
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Staging entry rejected successfully',
                 'data': {
-                    'id': staging_entry.id,
-                    'review_status': staging_entry.review_status
+                    'staging_id': staging_entry.id,
+                    'review_status': staging_entry.review_status,
+                    'rejection_reason': reason
                 }
             })
 
@@ -1134,7 +1326,6 @@ class StagingEntryDetailView(APIView):
             staging_entry = Staging.objects.select_related(
                 'created_by',
                 'reviewed_by',
-                'rejected_by'
             ).get(id=entry_id)
 
             # Check if user is authorized to view the entry
@@ -1225,6 +1416,15 @@ class StagingEntryUpdateView(APIView):
 
             if serializer.is_valid():
                 serializer.save()
+
+                # Log the activity
+                log_activity(
+                    user=request.user,
+                    action='STAGING_UPDATE',
+                    word_kh=serializer.data.get('word_kh'),
+                    word_en=serializer.data.get('word_en')
+                )
+
                 return Response({
                     'responseCode': status.HTTP_200_OK,
                     'message': 'Staging entry updated successfully',
@@ -1289,8 +1489,20 @@ class StagingEntryDeleteView(APIView):
                     'data': None
                 }, status=status.HTTP_403_FORBIDDEN)
 
+            # Store entry details before deletion for logging
+            word_kh = staging_entry.word_kh
+            word_en = staging_entry.word_en
+
             # Delete the entry
             staging_entry.delete()
+
+            # Log the activity
+            log_activity(
+                user=request.user,
+                action='STAGING_DELETE',
+                word_kh=word_kh,
+                word_en=word_en
+            )
 
             return Response({
                 'responseCode': status.HTTP_204_NO_CONTENT,

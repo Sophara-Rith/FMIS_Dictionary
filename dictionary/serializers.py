@@ -57,8 +57,6 @@ class StagingEntrySerializer(serializers.ModelSerializer):
     reviewed_by = serializers.SerializerMethodField()
     reviewed_at = serializers.SerializerMethodField()
     created_at = serializers.SerializerMethodField()
-    rejected_by = serializers.SerializerMethodField(required=False, allow_null=True)
-    rejected_at = serializers.SerializerMethodField()
     review_status = serializers.CharField(read_only=True)
 
     class Meta:
@@ -79,9 +77,7 @@ class StagingEntrySerializer(serializers.ModelSerializer):
             'created_at',
             'reviewed_by',
             'reviewed_at',
-            'review_status',
-            'rejected_by',
-            'rejected_at'
+            'review_status'
         ]
         read_only_fields = [
             'created_at',
@@ -89,8 +85,6 @@ class StagingEntrySerializer(serializers.ModelSerializer):
             'reviewed_at',
             'reviewed_by',
             'review_status',
-            'rejected_at',
-            'rejected_by',
             'rejection_reason'
         ]
 
@@ -105,12 +99,6 @@ class StagingEntrySerializer(serializers.ModelSerializer):
 
     def get_reviewed_at(self, obj):
         return convert_to_khmer_date(obj.reviewed_at.strftime('%d-%m-%Y')) if obj.reviewed_at else None
-
-    def get_rejected_by(self, obj):
-        return obj.rejected_by.username if obj.rejected_by else None
-
-    def get_rejected_at(self, obj):
-        return convert_to_khmer_date(obj.rejected_at.strftime('%d-%m-%Y')) if obj.rejected_at else None
 
 class StagingEntryCreateSerializer(serializers.ModelSerializer):
     class Meta:

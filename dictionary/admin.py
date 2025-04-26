@@ -1,6 +1,6 @@
 # dictionary/admin.py
 from django.contrib import admin
-from .models import Staging, Dictionary
+from .models import Staging, Dictionary, ActivityLog
 
 @admin.register(Staging)
 class StagingEntryAdmin(admin.ModelAdmin):
@@ -9,14 +9,11 @@ class StagingEntryAdmin(admin.ModelAdmin):
         'word_kh_type', 'word_en_type',
         'review_status',
         'created_at', 'created_by',
-        'rejected_at',
-        'rejected_by'
     ]
     list_filter = [
         'review_status',
         'word_kh_type',
         'word_en_type',
-        'rejected_at'
     ]
     search_fields = ['word_kh', 'word_en', 'rejection_reason']
 
@@ -32,3 +29,9 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
         'word_en_type'
     ]
     search_fields = ['word_kh', 'word_en']
+
+@admin.register(ActivityLog)
+class ActivityLogAdmin(admin.ModelAdmin):
+    list_display = ['username_kh', 'action', 'role', 'timestamp', 'word_kh', 'word_en']
+    list_filter = ['action', 'role', 'timestamp']
+    search_fields = ['username_kh', 'word_kh', 'word_en']

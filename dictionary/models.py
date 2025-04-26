@@ -92,7 +92,7 @@ class Staging(models.Model):
         verbose_name='Khmer Word Definition'
     )
     word_en_definition = models.TextField(
-verbose_name='English Word Definition'
+        verbose_name='English Word Definition'
     )
 
     pronunciation_kh = models.CharField(
@@ -143,21 +143,10 @@ verbose_name='English Word Definition'
         default='PENDING'
     )
 
-    rejected_at = models.DateTimeField(null=True, blank=True)
-    rejected_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        related_name='rejected_staging_entries',
-        null=True,
-        blank=True
-    )
     rejection_reason = models.TextField(
         null=True,
         blank=True,
-        verbose_name='Reason for Rejection',
-        validators=[
-            MinLengthValidator(10, "Rejection reason must be at least 10 characters long")
-        ]
+        verbose_name='Reason for Rejection'
     )
 
     def reject(self, user, reason):
@@ -316,3 +305,46 @@ class Bookmark(models.Model):
     def __str__(self):
         return f"Bookmark: {self.word.word_kh} - Device: {self.device_id}"
 
+class ActivityLog(models.Model):
+    ACTIONS = [
+        # Staging Word Actions
+        ('STAGING_CREATE', 'Staging Word Created'),
+        ('STAGING_UPDATE', 'Staging Word Updated'),
+        ('STAGING_DELETE', 'Staging Word Deleted'),
+        ('STAGING_APPROVE', 'Staging Word Approved'),
+        ('STAGING_REJECT', 'Staging Word Rejected'),
+
+        # Dictionary Word Actions
+        ('DICTIONARY_CREATE', 'Dictionary Word Created'),
+        ('DICTIONARY_UPDATE', 'Dictionary Word Updated'),
+        ('DICTIONARY_DELETE', 'Dictionary Word Deleted'),
+    ]
+
+    ROLES = [
+        ('USER', 'Regular User'),
+        ('ADMIN', 'Administrator'),
+        ('SUPERUSER', 'Super User'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='activity_logs'
+    )
+    username_kh = models.CharField(max_length=255, null=False, blank=False)
+    action = models.CharField(max_length=20, choices=ACTIONS)
+    role = models.CharField(max_length=10, choices=ROLES)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    # Specific details about the action
+    word_kh = models.CharField(max_length=255, null=True, blank=True)
+    word_en = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Activity Log'
+        verbose_name_plural = 'Activity Logs'
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.username_kh} - {self.get_action_display()} at {self.timestamp}"

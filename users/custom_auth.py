@@ -1,4 +1,7 @@
 # users/custom_auth.py
+from venv import logger
+from zoneinfo import ZoneInfo
+from datetime import datetime
 from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.authentication import TokenAuthentication, get_authorization_header
@@ -38,28 +41,41 @@ class ExpiringTokenAuthentication(TokenAuthentication):
 
 class DeviceJWTAuthentication(JWTAuthentication):
     def authenticate(self, request):
-        # Get Authorization header
-        header = get_authorization_header(request)
-
-        # Get Device ID from header
-        device_id = request.headers.get('X-Device-ID')
-
-        if not device_id:
-            return None
-
         try:
-            # Standard JWT authentication
-            validated_token = self.get_validated_token(header)
+            # Get Authorization header
+            header = get_authorization_header(request)
 
-            # Additional device validation
+            # Get Device ID from header
+            device_id = request.headers.get('X-Device-ID')
+
+            if not device_id:
+                return None
+
+            # Find the corresponding mobile device
             try:
-                # Check if device exists and is active
                 mobile_device = MobileDevice.objects.get(
                     device_id=device_id,
                     is_active=True
                 )
             except MobileDevice.DoesNotExist:
                 raise InvalidToken("Invalid or inactive device")
+
+            # Check if token has expired
+            from zoneinfo import ZoneInfo
+            from datetime import datetime
+
+            current_time = datetime.now(ZoneInfo("Asia/Phnom_Penh"))
+
+            if (mobile_device.token_expires_at and
+                current_time > mobile_device.token_expires_at):
+                # Deactivate the device
+                mobile_device.is_active = False
+                mobile_device.save()
+
+                raise InvalidToken("Token has expired. Please log in again.")
+
+            # Validate token
+            validated_token = self.get_validated_token(header)
 
             # Get user from token
             user = self.get_user(validated_token)
@@ -69,97 +85,127 @@ class DeviceJWTAuthentication(JWTAuthentication):
         except (InvalidToken, TokenError):
             return None
 
-class DeviceSpecificJWTAuthentication(JWTAuthentication):
+class MobileDeviceJWTAuthentication(JWTAuthentication):
     def authenticate(self, request):
-        # Check if this is a mobile-specific endpoint
-        is_mobile_endpoint = self.is_mobile_endpoint(request)
+        # Only authenticate mobile endpoints
+        if not self.is_mobile_endpoint(request):
+            return None
 
-        if not is_mobile_endpoint:
+        # Get Authorization header
+        header = get_authorization_header(request)
+        if not header:
             return None
 
         # Get Device ID from header
         device_id = request.headers.get('X-Device-ID')
+        if not device_id:
+            logger.warning("Mobile authentication attempt without Device ID")
+            return None
 
         try:
-            # Get the raw token from Authorization header
-            auth_header = get_authorization_header(request)
-
-            # Check if Authorization header is empty
-            if not auth_header:
-                # For mobile login endpoint, allow authentication without token
-                if request.path.endswith('/users/mobile/login/'):
-                    return None
-                raise InvalidToken("No authorization token provided")
-
-            # Split and decode the token
+            # Extract raw token
             try:
-                raw_token = auth_header.decode('utf-8').split()
+                raw_token = header.decode('utf-8').split()[1]
+            except (IndexError, UnicodeDecodeError):
+                raise InvalidToken("Invalid token format")
 
-                # Ensure token exists and is in correct format
-                if len(raw_token) < 2:
-                    raise InvalidToken("Invalid authorization header format")
+            # Get the mobile device
+            from .models import MobileDevice
+            try:
+                mobile_device = MobileDevice.objects.get(
+                    device_id=device_id,
+                    is_active=True
+                )
+            except MobileDevice.DoesNotExist:
+                logger.warning(f"No active mobile device found for ID: {device_id}")
+                raise InvalidToken("Invalid or inactive device")
 
-                raw_token = raw_token[1]  # Get the actual token part
-            except (IndexError, UnicodeDecodeError) as e:
-                raise InvalidToken(f"Token parsing error: {str(e)}")
+            # CRITICAL: Force expiration check with current time
+            utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
+            current_time = datetime.now(utc_plus_7)
 
-            # Use mobile-specific token validation
-            validated_token = self.validate_mobile_token(raw_token)
+            # Log times for debugging
+            logger.info(f"Current time: {current_time.isoformat()}")
+            logger.info(f"Token expires at: {mobile_device.token_expires_at.isoformat()}")
 
-            # Additional device validation
-            if device_id:
-                self.validate_mobile_device(device_id)
+            # Strict expiration check
+            if mobile_device.token_expires_at and current_time > mobile_device.token_expires_at:
+                # Deactivate device and force token invalidation
+                mobile_device.is_active = False
+                mobile_device.save()
+
+                # Log expiration
+                logger.warning(f"Token expired for device {device_id}. Current: {current_time}, Expires: {mobile_device.token_expires_at}")
+
+                # Force authentication failure
+                raise AuthenticationFailed("Token has expired. Please log in again.")
+
+            # Standard token validation
+            validated_token = self.get_validated_token(raw_token)
 
             # Get user from token
             user = self.get_user(validated_token)
 
+            # Update last activity
+            mobile_device.last_activity_at = current_time
+            mobile_device.save()
+
             return (user, validated_token)
 
-        except (InvalidToken, TokenError) as e:
-            print(f"Mobile Token Authentication Error: {str(e)}")
+        except (InvalidToken, TokenError, AuthenticationFailed) as e:
+            logger.error(f"Mobile authentication error: {str(e)}")
+            # Re-raise AuthenticationFailed to ensure it's properly handled
+            if isinstance(e, AuthenticationFailed):
+                raise e
             return None
 
     def is_mobile_endpoint(self, request):
         # List mobile-specific endpoints
         mobile_endpoints = [
             '/dictionary/bookmarks/',
-            '/dictionary/sync/',
-            '/dictionary/sync_all/',
+            '/dictionary/sync',
+            '/dictionary/sync_all',
             '/users/mobile/login/',
         ]
 
         # Check if current request path matches mobile endpoints
         return any(endpoint in request.path for endpoint in mobile_endpoints)
 
-    def validate_mobile_token(self, raw_token):
-        # Use mobile-specific token settings
-        from rest_framework_simplejwt.settings import api_settings
-
-        # Temporarily override token settings for mobile
-        original_settings = {
-            'ACCESS_TOKEN_LIFETIME': api_settings.ACCESS_TOKEN_LIFETIME,
-            'REFRESH_TOKEN_LIFETIME': api_settings.REFRESH_TOKEN_LIFETIME,
-        }
-
+    def get_validated_token(self, raw_token):
+        """
+        Override to use custom validation logic
+        """
         try:
-            # Apply mobile-specific settings
-            api_settings.ACCESS_TOKEN_LIFETIME = settings.MOBILE_JWT_SETTINGS['ACCESS_TOKEN_LIFETIME']
-            api_settings.REFRESH_TOKEN_LIFETIME = settings.MOBILE_JWT_SETTINGS['REFRESH_TOKEN_LIFETIME']
-
-            # Validate token
-            return AccessToken(raw_token)
-        finally:
-            # Restore original settings
-            api_settings.ACCESS_TOKEN_LIFETIME = original_settings['ACCESS_TOKEN_LIFETIME']
-            api_settings.REFRESH_TOKEN_LIFETIME = original_settings['REFRESH_TOKEN_LIFETIME']
+            # Validate token using parent method
+            validated_token = super().get_validated_token(raw_token)
+            return validated_token
+        except Exception as e:
+            logger.error(f"Token validation error: {str(e)}")
+            raise InvalidToken(str(e))
 
     def validate_mobile_device(self, device_id):
         from .models import MobileDevice
 
         try:
-            MobileDevice.objects.get(
+            mobile_device = MobileDevice.objects.get(
                 device_id=device_id,
                 is_active=True
             )
+
+            # Additional device validation
+            current_time = timezone.now()
+
+            # Check if device token has expired
+            if (mobile_device.token_expires_at and
+                current_time > mobile_device.token_expires_at):
+                # Deactivate the device
+                mobile_device.is_active = False
+                mobile_device.save()
+                raise InvalidToken("Device token has expired")
+
+            # Update last activity
+            mobile_device.last_activity_at = current_time
+            mobile_device.save()
+
         except MobileDevice.DoesNotExist:
             raise InvalidToken("Invalid or inactive mobile device")
