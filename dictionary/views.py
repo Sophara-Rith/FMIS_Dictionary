@@ -1822,7 +1822,6 @@ class BookmarkView(APIView):
 
     @swagger_auto_schema(
         operation_description="Retrieve User Bookmarks",
-        tags=['mobile'],
         manual_parameters=[
             openapi.Parameter(
                 'X-Device-ID',

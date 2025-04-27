@@ -17,8 +17,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from debug_utils import debug_error
-from .models import MobileDevice, User
-from .serializers import UserSerializer
+from .models import MobileDevice, User, UserComment
+from .serializers import UserCommentSerializer, UserCommentSubmitSerializer, UserSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
@@ -993,6 +993,200 @@ class UserUpdateView(APIView):
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class UserCommentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Submit a new comment",
+        tags=['mobile'],
+        request_body=UserCommentSubmitSerializer,
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique identifier for the mobile device',
+                required=True
+            )
+        ],
+        responses={
+            201: openapi.Response(
+                description='Comment submitted successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                    }
+                )
+            ),
+            400: openapi.Response(
+                description='Bad Request',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            )
+        }
+    )
+    def post(self, request):
+        """
+        Submit a new comment from authenticated user
+        """
+        # Check authentication
+        if not request.user or not request.user.is_authenticated:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Authentication required',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Get device_id from header
+        device_id = request.headers.get('X-Device-ID')
+        if not device_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'X-Device-ID header is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Create data with device_id from header
+            data = request.data.copy()
+            data['device_id'] = device_id
+
+            serializer = UserCommentSubmitSerializer(data=data, context={'request': request})
+
+            if serializer.is_valid():
+                comment = serializer.save()
+                return Response({
+                    'responseCode': status.HTTP_201_CREATED,
+                    'message': 'Comment submitted successfully',
+                    'data': None
+                }, status=status.HTTP_201_CREATED)
+
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Validation error',
+                'data': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Failed to submit comment',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @swagger_auto_schema(
+        operation_description="Get user comments",
+        manual_parameters=[
+            openapi.Parameter(
+                'X-Device-ID',
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                description='Unique identifier for the mobile device',
+                required=True
+            ),
+            openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=1),
+            openapi.Parameter('per_page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=10),
+            openapi.Parameter('is_reviewed', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN)
+        ],
+        responses={
+            200: openapi.Response(
+                description='Comments retrieved successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT),
+                        'total_comments': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
+                    }
+                )
+            )
+        }
+    )
+    def get(self, request):
+        """
+        Get comments with pagination and filtering
+        """
+        # Check authentication
+        if not request.user or not request.user.is_authenticated:
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Authentication required',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Get device_id from header
+        device_id = request.headers.get('X-Device-ID')
+        if not device_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'X-Device-ID header is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check authorization for viewing all comments
+        is_admin = request.user.role in ['ADMIN', 'SUPERUSER']
+
+        try:
+            # Pagination parameters
+            page = int(request.query_params.get('page', 1))
+            per_page = int(request.query_params.get('per_page', 10))
+            is_reviewed = request.query_params.get('is_reviewed')
+
+            # Base queryset
+            if is_admin:
+                # Admins can see all comments
+                comments = UserComment.objects.all()
+            else:
+                # Regular users can only see their own comments
+                comments = UserComment.objects.filter(user=request.user)
+
+            # Apply filters
+            if is_reviewed is not None:
+                comments = comments.filter(is_reviewed=is_reviewed.lower() == 'true')
+
+            # Count total before pagination
+            total_comments = comments.count()
+
+            # Apply pagination
+            start = (page - 1) * per_page
+            end = start + per_page
+            paginated_comments = comments[start:end]
+
+            # Serialize data
+            serializer = UserCommentSerializer(paginated_comments, many=True)
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Comments retrieved successfully',
+                'data': {
+                    'comments': serializer.data
+                },
+                'total_comments': total_comments,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': (total_comments + per_page - 1) // per_page
+            })
+
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Failed to retrieve comments',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class CustomTokenObtainPairView(TokenObtainPairView):
     @swagger_auto_schema(
         operation_description="Obtain JWT Tokens with Flexible Login",
@@ -1567,54 +1761,3 @@ class MobileLoginView(APIView):
             # Restore original JWT settings
             settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'] = original_access_lifetime
             settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'] = original_refresh_lifetime
-
-class PublicTestEndpoint(APIView):
-    permission_classes = [AllowAny]  # No authentication required
-
-    @swagger_auto_schema(
-        operation_description="Public Test Endpoint - No Authentication Required",
-        responses={
-            200: openapi.Response(
-                description='Successful Test Response',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(
-                            type=openapi.TYPE_INTEGER,
-                            description='HTTP status code',
-                            example=200
-                        ),
-                        'message': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Test endpoint message',
-                            example='API is working perfectly!'
-                        ),
-                        'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'timestamp': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    description='Current server timestamp'
-                                ),
-                                'version': openapi.Schema(
-                                    type=openapi.TYPE_STRING,
-                                    description='API version'
-                                )
-                            }
-                        )
-                    }
-                )
-            )
-        }
-    )
-    def get(self, request):
-        from datetime import datetime
-
-        return Response({
-            'responseCode': status.HTTP_200_OK,
-            'message': 'API is working perfectly!',
-            'data': {
-                'timestamp': datetime.now().isoformat(),
-                'version': 'v0.8'
-            }
-        })

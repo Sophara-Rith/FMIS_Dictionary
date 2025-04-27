@@ -4,7 +4,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
 from django.db.models import Max
 import re
-from .models import User
+from .models import User, UserComment
 
 def format_phone_number(phone_number):
     """
@@ -379,3 +379,41 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'role': user.role
             }
         }
+
+class UserCommentSerializer(serializers.ModelSerializer):
+    username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserComment
+        fields = [
+            'id',
+            'username',
+            'detail',
+            'device_id',
+            'created_at',
+            'is_reviewed'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def get_username(self, obj):
+        return obj.user.username
+
+class UserCommentSubmitSerializer(serializers.ModelSerializer):
+    """
+    Serializer specifically for mobile app comment submission
+    """
+    class Meta:
+        model = UserComment
+        fields = ['detail', 'device_id']
+
+    def create(self, validated_data):
+        # Get the current authenticated user
+        user = self.context['request'].user
+
+        # Create comment with the current user
+        comment = UserComment.objects.create(
+            user=user,
+            detail=validated_data['detail'],
+            device_id=validated_data.get('device_id')
+        )
+        return comment

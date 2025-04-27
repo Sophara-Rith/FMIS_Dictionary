@@ -39,7 +39,7 @@ urlpatterns = [
     path('sync_all', DictionarySyncAllView.as_view(), name='dictionary_sync_all'),
     path('sync', DictionarySyncView.as_view(), name='dictionary_sync'),
 
-    path('search/', DictionarySearchView.as_view(), name='dictionary-search'),
+    path('search', DictionarySearchView.as_view(), name='dictionary-search'),
 
     path('staging/bulk_input/', StagingBulkImportView.as_view(), name='staging-bulk-import'),
 
