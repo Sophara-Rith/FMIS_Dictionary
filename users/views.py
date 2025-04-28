@@ -18,9 +18,11 @@ from django.utils import timezone
 
 from debug_utils import debug_error
 from .models import MobileDevice, User, UserComment
-from .serializers import UserCommentSerializer, UserCommentSubmitSerializer, UserSerializer
+from .serializers import UserCommentSerializer, UserCommentSubmitSerializer, UserSerializer, PasswordValidator
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+from .utils import log_activity
+from users import serializers
 
 User = get_user_model()
 
@@ -170,9 +172,11 @@ class UserLoginView(APIView):
                                         'username': openapi.Schema(type=openapi.TYPE_STRING),
                                         'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
                                         'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'password': openapi.Schema(type=openapi.TYPE_STRING),
                                         'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
                                         'position': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
+                                        'phone_number': openapi.Schema(type=openapi.TYPE_STRING),
+                                        'role': openapi.Schema(type=openapi.TYPE_STRING)
                                     }
                                 )
                             }
@@ -208,6 +212,13 @@ class UserLoginView(APIView):
             if user and user.check_password(password):
                 # Generate tokens
                 refresh = RefreshToken.for_user(user)
+
+                # Log the successful login
+                log_activity(
+                    admin_user=user,
+                    action='USER_LOGIN',
+                    target_user=user
+                )
 
                 return Response({
                     'responseCode': status.HTTP_200_OK,
@@ -565,6 +576,13 @@ class UserRegisterView(APIView):
                     'phone_number': user.phone_number or ''
                 }
 
+                # Log the user creation activity
+                log_activity(
+                    user=request.user,
+                    action='USER_REGISTER',
+                    target_user=user
+                )
+
                 return Response({
                     'responseCode': status.HTTP_201_CREATED,
                     'message': 'User registered successfully',
@@ -607,90 +625,117 @@ class UserDropView(APIView):
                     }
                 )
             ),
-            403: openapi.Response(
-                description='Forbidden',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
-                    }
-                )
-            )
+            400: 'Bad Request - Missing identification parameter',
+            403: 'Forbidden - Insufficient permissions',
+            404: 'Not Found - User not found',
+            500: 'Internal Server Error'
         }
     )
     @debug_error
     def delete(self, request):
-        # Check authentication
-        if not request.user or not request.user.is_authenticated:
-            return Response({
-                'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Authentication required',
-                'data': None
-            }, status=status.HTTP_401_UNAUTHORIZED)
-
-        # Check authorization
+        # Check if user is ADMIN or SUPERUSER
         if request.user.role not in ['ADMIN', 'SUPERUSER']:
             return Response({
                 'responseCode': status.HTTP_403_FORBIDDEN,
-                'message': 'You do not have permission to perform this action',
+                'message': 'You do not have permission to delete users',
                 'data': None
             }, status=status.HTTP_403_FORBIDDEN)
 
+        # Get identification parameters
+        user_id = request.query_params.get('id')
+        username = request.query_params.get('username')
+        email = request.query_params.get('email')
+
+        # Validate at least one identification parameter is provided
+        if not any([user_id, username, email]):
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'At least one identification parameter (id, username, email) is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            # User identification parameters
-            user_id = request.query_params.get('id')
-            username = request.query_params.get('username')
-            email = request.query_params.get('email')
-
-            # Find user
-            user = None
+            # Find the user to delete
+            user_query = {}
             if user_id:
-                user = get_object_or_404(User, id=user_id, is_deleted=False)
+                user_query['id'] = user_id
             elif username:
-                user = get_object_or_404(User, username=username, is_deleted=False)
+                user_query['username'] = username
             elif email:
-                user = get_object_or_404(User, email=email, is_deleted=False)
-            else:
+                user_query['email'] = email
+
+            target_user = User.objects.get(id=user_id)
+
+            # Get the user model
+            User = get_user_model()
+
+            # Try to get the user, including those that might be soft-deleted
+            # This is important - we need to check the base queryset, not the filtered one
+            try:
+                # Use the base manager to get all users including soft-deleted ones
+                if hasattr(User, 'objects') and hasattr(User.objects, 'get_queryset'):
+                    base_queryset = User.objects.get_queryset().filter(is_deleted=False)
+                    user = base_queryset.get(**user_query)
+                else:
+                    # Fallback to regular manager
+                    user = User.objects.get(**user_query)
+            except User.DoesNotExist:
+                return Response({
+                    'responseCode': status.HTTP_404_NOT_FOUND,
+                    'message': 'No User matches the given query.',
+                    'data': None
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Prevent deleting the current user
+            if user.id == request.user.id:
                 return Response({
                     'responseCode': status.HTTP_400_BAD_REQUEST,
-                    'message': 'Identification parameter required',
+                    'message': 'You cannot delete your own account',
                     'data': None
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Prevent deleting own account
-            if request.user.id == user.id:
-                return Response({
-                    'responseCode': status.HTTP_400_BAD_REQUEST,
-                    'message': 'Cannot delete own account',
-                    'data': None
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Specific check: Only SUPERUSER can delete ADMIN accounts
-            if user.role == 'ADMIN' and request.user.role != 'SUPERUSER':
+            # Prevent ADMIN from deleting SUPERUSER
+            if request.user.role == 'ADMIN' and user.role == 'SUPERUSER':
                 return Response({
                     'responseCode': status.HTTP_403_FORBIDDEN,
-                    'message': 'Only SUPERUSER can delete ADMIN accounts',
+                    'message': 'ADMIN cannot delete SUPERUSER accounts',
                     'data': None
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            # Store user details before deletion
-            # user_details = {
-            #     'username': user.username,
-            #     'email': user.email,
-            #     'role': user.role
-            # }
+            # Store user details for response
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'role': user.role
+            }
 
+            # Perform soft delete
             user.soft_delete()
 
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            # Log the user creation activity
+            log_activity(
+                user=request.user,
+                action='USER_DELETE',
+                target_user=target_user
+            )
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'User deleted successfully',
+                'data': user_data
+            })
 
         except Exception as e:
+            # Log the error for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error deleting user: {str(e)}", exc_info=True)
+
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': 'Deletion failed',
-                'data': str(e)
+                'message': f'Deletion failed: {str(e)}',
+                'data': None
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserUpdateView(APIView):
@@ -866,7 +911,7 @@ class UserUpdateView(APIView):
         }
     )
     @debug_error
-    def put(self, request):
+    def patch(self, request):
         try:
             # Determine which user to update
             user_id = request.query_params.get('id')
@@ -961,6 +1006,13 @@ class UserUpdateView(APIView):
             if serializer.is_valid():
                 updated_user = serializer.save()
 
+                # Log the activity
+                log_activity(
+                    admin_user=request.user,
+                    action='USER_UPDATE',
+                    target_user=updated_user
+                )
+
                 # Prepare response data
                 response_data = {
                     'username': updated_user.username,
@@ -998,7 +1050,7 @@ class UserCommentView(APIView):
 
     @swagger_auto_schema(
         operation_description="Submit a new comment",
-        tags=['mobile'],
+        tags=['dictionary'],
         request_body=UserCommentSubmitSerializer,
         manual_parameters=[
             openapi.Parameter(
@@ -1629,14 +1681,12 @@ class MobileLoginView(APIView):
         # Specific mobile login credentials
         MOBILE_LOGIN_USERNAME = 'fmis369'
         MOBILE_LOGIN_PASSWORD = 'Fmis@dic2O@$'
-
         # Extract parameters
         device_id = request.data.get('device_id')
         login_input = request.data.get('login_input')
         password = request.data.get('password')
         device_name = request.data.get('device_name', '')
         device_type = request.data.get('device_type', '')
-
         # Validate required parameters
         if not all([device_id, login_input, password]):
             return Response({
@@ -1644,7 +1694,6 @@ class MobileLoginView(APIView):
                 'message': 'Missing required parameters',
                 'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
-
         # Validate login credentials specifically for mobile
         if (login_input != MOBILE_LOGIN_USERNAME or
             password != MOBILE_LOGIN_PASSWORD):
@@ -1653,12 +1702,10 @@ class MobileLoginView(APIView):
                 'message': 'Invalid mobile credentials',
                 'data': None
             }, status=status.HTTP_401_UNAUTHORIZED)
-
         try:
             # Explicitly import User model
             from django.contrib.auth import get_user_model
             User = get_user_model()
-
             # Find or create mobile user
             user, created = User.objects.get_or_create(
                 username=MOBILE_LOGIN_USERNAME,
@@ -1667,34 +1714,31 @@ class MobileLoginView(APIView):
                     'is_active': True
                 }
             )
-
             # Set password only if user is newly created
             if created:
                 user.set_password(MOBILE_LOGIN_PASSWORD)
                 user.save()
-
             # Generate tokens with custom method for precise control
             access_token, refresh_token, token_expires_at = self.generate_mobile_tokens(user, device_id)
-
-            # Remove existing devices with the same device_id
-            MobileDevice.objects.filter(device_id=device_id).delete()
 
             # Use UTC+7 for logging and other timestamp operations
             utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
             current_time = datetime.now(utc_plus_7)
 
-            # Create mobile device with UTC+7 timestamp
-            mobile_device = MobileDevice.objects.create(
-                user=user,
-                device_id=device_id,
-                device_name=device_name,
-                device_type=device_type,
-                access_token=access_token,
-                refresh_token=refresh_token,
-                is_active=True,
-                token_created_at=current_time,
-                token_expires_at=token_expires_at,
-                last_activity_at=current_time
+            # Instead of deleting and creating, use update_or_create
+            mobile_device, created = MobileDevice.objects.update_or_create(
+                device_id=device_id,  # This is the lookup field
+                defaults={  # These fields will be updated if the record exists
+                    'user': user,
+                    'device_name': device_name,
+                    'device_type': device_type,
+                    'access_token': access_token,
+                    'refresh_token': refresh_token,
+                    'is_active': True,
+                    'token_created_at': current_time,
+                    'token_expires_at': token_expires_at,
+                    'last_activity_at': current_time
+                }
             )
 
             return Response({
@@ -1710,54 +1754,364 @@ class MobileLoginView(APIView):
                     'current_time': current_time.isoformat()
                 }
             })
-
         except Exception as e:
             # Comprehensive error logging
             logger.error(f"Mobile Login Error: {str(e)}")
             logger.error(f"Error Details: {traceback.format_exc()}")
-
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
                 'message': 'Mobile login failed',
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
     @staticmethod
     def generate_mobile_tokens(user, device_id):
         from rest_framework_simplejwt.tokens import RefreshToken
         from django.conf import settings
         from zoneinfo import ZoneInfo
         from datetime import datetime, timedelta
-
         # Use mobile-specific JWT settings
         mobile_settings = settings.MOBILE_JWT_SETTINGS
-
         # Create refresh token with mobile-specific lifetime
         refresh = RefreshToken.for_user(user)
-
         # Temporarily override token lifetimes for mobile
         original_access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
         original_refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
-
         try:
             # Override with mobile-specific settings
             settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'] = mobile_settings['ACCESS_TOKEN_LIFETIME']
             settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'] = mobile_settings['REFRESH_TOKEN_LIFETIME']
-
             # Add custom claims
             refresh['device_id'] = device_id
-
             # Calculate token expiration in UTC+7
             utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
             token_expires_at = datetime.now(utc_plus_7) + mobile_settings['ACCESS_TOKEN_LIFETIME']
-
             # Convert tokens to strings
             access_token = str(refresh.access_token)
             refresh_token = str(refresh)
-
             return access_token, refresh_token, token_expires_at
-
         finally:
             # Restore original JWT settings
             settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'] = original_access_lifetime
             settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'] = original_refresh_lifetime
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Change user password",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['current_password', 'new_password'],
+            properties={
+                'current_password': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Current password"
+                ),
+                'new_password': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="New password"
+                ),
+                'confirm_password': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Confirm new password"
+                )
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description='Password Changed Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            ),
+            400: 'Validation Error',
+            401: 'Current Password Incorrect'
+        }
+    )
+    @debug_error
+    def post(self, request):
+        user = request.user
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+        confirm_password = request.data.get('confirm_password')
+
+        # Validate input
+        if not all([current_password, new_password, confirm_password]):
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'All password fields are required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if current password is correct
+        if not user.check_password(current_password):
+            return Response({
+                'responseCode': status.HTTP_401_UNAUTHORIZED,
+                'message': 'Current password is incorrect',
+                'data': None
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Check if new passwords match
+        if new_password != confirm_password:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'New passwords do not match',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if new password is different from current password
+        if current_password == new_password:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'New password must be different from current password',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate password complexity using the same validator as registration
+        try:
+            # Using the PasswordValidator from serializers.py [1][2]
+            PasswordValidator.validate_password(new_password)
+        except serializers.ValidationError as e:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': str(e.detail[0]) if isinstance(e.detail, list) else str(e.detail),
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Set new password
+        user.set_password(new_password)
+        user.save()
+
+        # Log the password change activity
+        log_activity(
+            admin_user=request.user,
+            action='USER_PASSWORD_CHANGE',
+            target_user=request.user
+        )
+
+        return Response({
+            'responseCode': status.HTTP_200_OK,
+            'message': 'Password changed successfully',
+            'data': None
+        })
+
+class UserActivityLogView(APIView):
+    permission_classes = [IsAuthenticated]
+    @swagger_auto_schema(
+        operation_description="View user activity logs (SUPERUSER only)",
+        manual_parameters=[
+            openapi.Parameter(
+                'user_id',
+                openapi.IN_QUERY,
+                description="Filter logs by specific user ID",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+            openapi.Parameter(
+                'role',
+                openapi.IN_QUERY,
+                description="Filter logs by user role (USER, ADMIN)",
+                type=openapi.TYPE_STRING,
+                enum=['USER', 'ADMIN'],
+                required=False
+            ),
+            openapi.Parameter(
+                'start_date',
+                openapi.IN_QUERY,
+                description="Filter logs from this date (YYYY-MM-DD)",
+                type=openapi.TYPE_STRING,
+                format='date',
+                required=False
+            ),
+            openapi.Parameter(
+                'end_date',
+                openapi.IN_QUERY,
+                description="Filter logs until this date (YYYY-MM-DD)",
+                type=openapi.TYPE_STRING,
+                format='date',
+                required=False
+            ),
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number for pagination",
+                type=openapi.TYPE_INTEGER,
+                default=1,
+                required=False
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of logs per page",
+                type=openapi.TYPE_INTEGER,
+                default=50,
+                required=False
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description='Activity logs retrieved successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'total_logs': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'logs': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'user_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                            'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'role': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'action': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'action_display': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'timestamp': openapi.Schema(type=openapi.TYPE_STRING, format='date-time')
+                                        }
+                                    )
+                                )
+                            }
+                        )
+                    }
+                )
+            ),
+            400: 'Bad Request - Invalid parameters',
+            403: 'Forbidden - Only SUPERUSER can access activity logs'
+        }
+    )
+    @debug_error
+    def get(self, request):
+        # Check if user is SUPERUSER
+        if request.user.role != 'SUPERUSER':
+            return Response({
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'Only SUPERUSER can access user activity logs',
+                'data': None
+            }, status=status.HTTP_403_FORBIDDEN)
+        try:
+            # Import necessary modules
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            from .models import ActivityLog
+
+            # Define UTC+7 timezone
+            utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
+
+            # Extract filter parameters
+            user_id = request.query_params.get('user_id')
+            role = request.query_params.get('role')
+            action = request.query_params.get('action')
+            start_date = request.query_params.get('start_date')
+            end_date = request.query_params.get('end_date')
+
+            # Pagination parameters
+            page = int(request.query_params.get('page', 1))
+            per_page = int(request.query_params.get('per_page', 50))
+
+            # Base queryset - using the imported ActivityLog model
+            logs_query = ActivityLog.objects.select_related('user').order_by('-timestamp')
+
+            # Apply filters
+            if user_id:
+                logs_query = logs_query.filter(user_id=user_id)
+
+            if role:
+                # Filter by user role - only show USER and ADMIN activities
+                if role not in ['USER', 'ADMIN']:
+                    return Response({
+                        'responseCode': status.HTTP_400_BAD_REQUEST,
+                        'message': 'Invalid role parameter. Must be USER or ADMIN',
+                        'data': None
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                logs_query = logs_query.filter(role=role)
+            else:
+                # By default, only show USER and ADMIN activities
+                logs_query = logs_query.filter(role__in=['USER', 'ADMIN'])
+
+            if action:
+                logs_query = logs_query.filter(action=action)
+
+            if start_date:
+                try:
+                    start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+                    logs_query = logs_query.filter(timestamp__date__gte=start_date)
+                except ValueError:
+                    return Response({
+                        'responseCode': status.HTTP_400_BAD_REQUEST,
+                        'message': 'Invalid start_date format. Use YYYY-MM-DD',
+                        'data': None
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            if end_date:
+                try:
+                    end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+                    logs_query = logs_query.filter(timestamp__date__lte=end_date)
+                except ValueError:
+                    return Response({
+                        'responseCode': status.HTTP_400_BAD_REQUEST,
+                        'message': 'Invalid end_date format. Use YYYY-MM-DD',
+                        'data': None
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Count total logs for pagination
+            total_logs = logs_query.count()
+            total_pages = (total_logs + per_page - 1) // per_page  # Ceiling division
+
+            # Apply pagination
+            start_index = (page - 1) * per_page
+            end_index = start_index + per_page
+            paginated_logs = logs_query[start_index:end_index]
+
+            # Format the logs with UTC+7 timezone
+            logs_data = []
+            for log in paginated_logs:
+                # Convert timestamp to UTC+7
+                timestamp_utc7 = log.timestamp.astimezone(utc_plus_7)
+
+                log_data = {
+                    'id': log.id,
+                    'user_id': log.user_id,
+                    'username_kh': log.username_kh,
+                    'role': log.role,
+                    'action': log.action,
+                    'action_display': log.get_action_display(),
+                    'word_kh': log.word_kh,
+                    'word_en': log.word_en,
+                    'timestamp': timestamp_utc7.isoformat()  # UTC+7 timestamp
+                }
+                logs_data.append(log_data)
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'User activity logs retrieved successfully',
+                'data': {
+                    'logs': logs_data,
+                    'total_logs': total_logs,
+                    'page': page,
+                    'per_page': per_page,
+                    'total_pages': total_pages
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Error retrieving activity logs: {str(e)}", exc_info=True)
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Failed to retrieve activity logs',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

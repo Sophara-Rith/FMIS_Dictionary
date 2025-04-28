@@ -77,7 +77,8 @@ class StagingEntrySerializer(serializers.ModelSerializer):
             'created_at',
             'reviewed_by',
             'reviewed_at',
-            'review_status'
+            'review_status',
+            'rejection_reason'
         ]
         read_only_fields = [
             'created_at',

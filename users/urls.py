@@ -1,6 +1,8 @@
 # users/urls.py
 from django.urls import path
 from .views import (
+    ChangePasswordView,
+    UserActivityLogView,
     UserLoginView,
     UserRegisterView,
     UserDropView,
@@ -22,4 +24,8 @@ urlpatterns = [
 
     path('mobile/login/', MobileLoginView.as_view(), name='mobile_login'),
     path('comment/', UserCommentView.as_view(), name='user-comment'),
+
+    path('activity-log', UserActivityLogView.as_view(), name='user-activity-logs'),
+    path('change-password/', ChangePasswordView.as_view(), name='change-password'),
+
 ]

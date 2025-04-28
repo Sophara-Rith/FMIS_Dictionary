@@ -252,3 +252,62 @@ class UserComment(models.Model):
 
     def __str__(self):
         return f"Comment by {self.user.username} at {self.created_at}"
+
+class ActivityLog(models.Model):
+    ACTIONS = [
+        # Staging Word Actions
+        ('STAGING_CREATE', 'Staging Word Created'),
+        ('STAGING_UPDATE', 'Staging Word Updated'),
+        ('STAGING_DELETE', 'Staging Word Deleted'),
+        ('STAGING_APPROVE', 'Staging Word Approved'),
+        ('STAGING_REJECT', 'Staging Word Rejected'),
+
+        # Dictionary Word Actions
+        ('DICTIONARY_CREATE', 'Dictionary Word Created'),
+        ('DICTIONARY_UPDATE', 'Dictionary Word Updated'),
+        ('DICTIONARY_DELETE', 'Dictionary Word Deleted'),
+
+        # User Actions
+        ('USER_REGISTER', 'User Registered'),
+        ('USER_UPDATE', 'User Updated'),
+        ('USER_DELETE', 'User Deleted'),
+        ('USER_LOGIN', 'User Logged In'),
+        ('USER_PASSWORD_CHANGE', 'User Changed Password'),
+    ]
+
+    ROLES = [
+        ('USER', 'Regular User'),
+        ('ADMIN', 'Administrator'),
+        ('SUPERUSER', 'Super User'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='activity_logs'
+    )
+    username_kh = models.CharField(max_length=255, null=True, blank=True)
+    action = models.CharField(max_length=20, choices=ACTIONS)
+    role = models.CharField(max_length=10, choices=ROLES)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    # Specific details about the action
+    word_kh = models.CharField(max_length=255, null=True, blank=True)
+    word_en = models.CharField(max_length=255, null=True, blank=True)
+
+    # Fields for target user information
+    email = models.EmailField(null=True, blank=True)
+    staff_id = models.CharField(max_length=50, null=True, blank=True)
+    username = models.CharField(max_length=150, null=True, blank=True)
+
+    # Additional details as JSON
+    action_details = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Activity Log'
+        verbose_name_plural = 'Activity Logs'
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.username_kh or self.user.username if self.user else 'Unknown'} - {self.get_action_display()} at {self.timestamp}"

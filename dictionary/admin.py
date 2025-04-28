@@ -1,6 +1,7 @@
 # dictionary/admin.py
 from django.contrib import admin
-from .models import Staging, Dictionary, ActivityLog
+from .models import Staging, Dictionary
+from users.models import ActivityLog
 
 @admin.register(Staging)
 class StagingEntryAdmin(admin.ModelAdmin):

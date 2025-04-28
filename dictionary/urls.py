@@ -1,8 +1,10 @@
 # dictionary/urls.py
 from django.urls import path
 from .views import (
+    DictionaryDeleteView,
     DictionaryEntryListView,
     DictionaryEntryDetailView,
+    DictionaryUpdateView,
     StagingEntryListView,
     StagingEntryCreateView,
     StagingEntryDetailView,
@@ -22,6 +24,8 @@ from .views import (
 urlpatterns = [
     path('list', DictionaryEntryListView.as_view(), name='dictionary-entry-list'),
     path('detail', DictionaryEntryDetailView.as_view(), name='dictionary-entry-detail'),
+    path('update', DictionaryUpdateView.as_view(), name='dictionary-update'),
+    path('delete', DictionaryDeleteView.as_view(), name='dictionary-delete'),
 
     # Staging Entries Routes
     path('staging/list', StagingEntryListView.as_view(), name='staging-entry-list'),
@@ -43,5 +47,5 @@ urlpatterns = [
 
     path('staging/bulk_input/', StagingBulkImportView.as_view(), name='staging-bulk-import'),
 
-    path('template', DictionaryTemplateDownloadView.as_view(), name='dictionary-template-download')
+    path('template', DictionaryTemplateDownloadView.as_view(), name='dictionary-template-download'),
 ]

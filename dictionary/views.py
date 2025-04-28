@@ -1,5 +1,7 @@
 # dictionary/views.py
+from datetime import datetime
 import math
+import threading
 import time
 import logging
 from functools import wraps, reduce
@@ -21,7 +23,7 @@ from django.core.cache import cache
 from django.conf import settings
 from django.db.models import Q, Max, Case, When, Value, IntegerField, Prefetch
 
-from users.models import User
+from users.models import User, ActivityLog
 from .models import Dictionary, Staging, Bookmark, WordType, RelatedWord
 from .serializers import (
     DictionaryEntrySerializer,
@@ -31,8 +33,11 @@ from .serializers import (
 )
 from debug_utils import debug_error
 from .tasks import process_staging_bulk_import
-from .utils import DictionaryTemplateGenerator, log_activity
+from .utils import DictionaryTemplateGenerator
+from users.utils import log_activity
 from dictionary import models
+
+from dictionary import serializers
 
 logger = logging.getLogger(__name__)
 
@@ -502,10 +507,10 @@ class DictionarySearchView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class DictionaryDeleteView(APIView):
-    permission_classes = [IsAuthenticated]  # Only admin can drop entries
+    permission_classes = [IsAuthenticated]  # Only SUPERUSER can drop entries
 
     @swagger_auto_schema(
-        operation_description="Drop dictionary entries by specific ID(s)",
+        operation_description="Drop dictionary entries by specific ID(s) (SUPERUSER only)",
         manual_parameters=[
             openapi.Parameter(
                 'id',
@@ -547,10 +552,17 @@ class DictionaryDeleteView(APIView):
     )
     @debug_error
     def delete(self, request):
+        # Check if user is SUPERUSER
+        if request.user.role != 'SUPERUSER':
+            return Response({
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'Only SUPERUSER can delete dictionary entries',
+                'data': None
+            }, status=status.HTTP_403_FORBIDDEN)
+
         try:
             # Get ID parameter
             id_param = request.query_params.get('id')
-
             # Validate ID parameter
             if not id_param:
                 return Response({
@@ -558,7 +570,6 @@ class DictionaryDeleteView(APIView):
                     'message': 'ID parameter is required',
                     'data': None
                 }, status=status.HTTP_400_BAD_REQUEST)
-
             # Parse IDs, handling both comma-separated and single ID
             try:
                 # Split and convert to integers, removing any whitespace
@@ -569,21 +580,17 @@ class DictionaryDeleteView(APIView):
                     'message': 'Invalid ID format. Must be integer or comma-separated integers',
                     'data': None
                 }, status=status.HTTP_400_BAD_REQUEST)
-
             # Prepare lists to track dropped and failed entries
             dropped_ids = []
             failed_ids = []
-
             # Process each ID
             for entry_id in ids:
                 try:
                     # Retrieve the dictionary entry
-                    entry = Dictionary.objects.get(id=entry_id)
-
+                    entry = Dictionary.objects.get(id=entry_id, is_deleted=False)
                     # Perform soft delete
                     entry.soft_delete(user=request.user)
                     dropped_ids.append(entry_id)
-
                 except Dictionary.DoesNotExist:
                     # Track IDs that don't exist
                     failed_ids.append(entry_id)
@@ -591,7 +598,6 @@ class DictionaryDeleteView(APIView):
                     # Log any unexpected errors
                     logger.error(f"Error dropping entry {entry_id}: {str(e)}")
                     failed_ids.append(entry_id)
-
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': f'{len(dropped_ids)} dictionary entries dropped',
@@ -601,7 +607,6 @@ class DictionaryDeleteView(APIView):
                     'failed_ids': failed_ids
                 }
             })
-
         except Exception as e:
             logger.error(f"Dictionary drop error: {str(e)}", exc_info=True)
             return Response({
@@ -609,6 +614,117 @@ class DictionaryDeleteView(APIView):
                 'message': 'Failed to drop dictionary entries',
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class DictionaryUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Update dictionary entry (SUPERUSER only)",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the dictionary entry to update",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
+                'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description='Dictionary entry updated successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                    }
+                )
+            ),
+            400: 'Bad Request',
+            403: 'Forbidden - Only SUPERUSER can update dictionary entries',
+            404: 'Dictionary entry not found'
+        }
+    )
+    @debug_error
+    def put(self, request):
+        # Check if user is SUPERUSER
+        if request.user.role != 'SUPERUSER':
+            return Response({
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'Only SUPERUSER can update dictionary entries',
+                'data': None
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # Get the entry ID from query parameters
+        entry_id = request.query_params.get('id')
+
+        if not entry_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Dictionary entry ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Retrieve the dictionary entry
+            dictionary_entry = Dictionary.objects.get(id=entry_id, is_deleted=False)
+
+            # Create a serializer for the dictionary entry
+            serializer = DictionaryEntrySerializer(
+                dictionary_entry,
+                data=request.data,
+                partial=True
+            )
+
+            if serializer.is_valid():
+                # Save the updated entry
+                updated_entry = serializer.save(
+                    updated_at=timezone.now(),
+                    updated_by=request.user
+                )
+
+                # Log the activity
+                log_activity(
+                    user=request.user,
+                    action='DICTIONARY_UPDATE',
+                    word_kh=updated_entry.word_kh,
+                    word_en=updated_entry.word_en
+                )
+
+                return Response({
+                    'responseCode': status.HTTP_200_OK,
+                    'message': 'Dictionary entry updated successfully',
+                    'data': serializer.data
+                })
+            else:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Validation error',
+                    'errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Dictionary.DoesNotExist:
+            return Response({
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'Dictionary entry not found',
+                'data': None
+            }, status=status.HTTP_404_NOT_FOUND)
 
 def generate_next_index():
     """
@@ -1045,6 +1161,7 @@ class StagingEntryApproveView(APIView):
             staging_entry = Staging.objects.get(id=entry_id)
 
             # Check permissions
+            # Both ADMIN and SUPERUSER can approve entries
             if request.user.role not in ['ADMIN', 'SUPERUSER']:
                 return Response({
                     'responseCode': status.HTTP_403_FORBIDDEN,
@@ -1218,6 +1335,7 @@ class StagingEntryRejectView(APIView):
             staging_entry = Staging.objects.get(id=entry_id)
 
             # Check permissions
+            # Both ADMIN and SUPERUSER can reject entries
             if request.user.role not in ['ADMIN', 'SUPERUSER']:
                 return Response({
                     'responseCode': status.HTTP_403_FORBIDDEN,
@@ -1298,8 +1416,7 @@ class StagingEntryDetailView(APIView):
                                 'review_status': openapi.Schema(type=openapi.TYPE_STRING),
                                 'reviewed_by': openapi.Schema(type=openapi.TYPE_STRING),
                                 'reviewed_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
-                                'rejected_by': openapi.Schema(type=openapi.TYPE_STRING),
-                                'rejected_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time')
+                                'rejection_reason': openapi.Schema(type=openapi.TYPE_STRING)
                             }
                         )
                     }
@@ -1310,6 +1427,7 @@ class StagingEntryDetailView(APIView):
             404: 'Not Found'
         }
     )
+    @debug_error
     def get(self, request):
         # Get the entry ID from query parameters
         entry_id = request.query_params.get('id')
@@ -1329,6 +1447,9 @@ class StagingEntryDetailView(APIView):
             ).get(id=entry_id)
 
             # Check if user is authorized to view the entry
+            # ADMIN can view any entry
+            # SUPERUSER can view any entry
+            # Regular users can only view their own entries
             is_authorized = (
                 request.user.role in ['ADMIN', 'SUPERUSER'] or
                 staging_entry.created_by == request.user
@@ -1399,8 +1520,14 @@ class StagingEntryUpdateView(APIView):
             staging_entry = Staging.objects.get(id=entry_id)
 
             # Check permissions
-            if (staging_entry.created_by != request.user and
-                request.user.role not in ['ADMIN', 'SUPERUSER']):
+            # SUPERUSER can update any entry
+            # ADMIN can only update their own entries
+            # Regular users can only update their own entries
+            if request.user.role == 'SUPERUSER':
+                # SUPERUSER can update any entry
+                pass
+            elif staging_entry.created_by != request.user:
+                # Others can only update their own entries
                 return Response({
                     'responseCode': status.HTTP_403_FORBIDDEN,
                     'message': 'You are not authorized to update this entry',
@@ -1459,7 +1586,7 @@ class StagingEntryDeleteView(APIView):
             )
         ],
         responses={
-            204: 'Successfully deleted',
+            200: 'Successfully deleted',
             403: 'Forbidden',
             404: 'Not found'
         }
@@ -1481,15 +1608,16 @@ class StagingEntryDeleteView(APIView):
             staging_entry = Staging.objects.get(id=entry_id)
 
             # Check permissions
-            if (staging_entry.created_by != request.user and
-                request.user.role not in ['ADMIN', 'SUPERUSER']):
+            # Only SUPERUSER can delete any entry
+            # ADMIN and regular users can only delete their own entries
+            if request.user.role != 'SUPERUSER' and staging_entry.created_by != request.user:
                 return Response({
                     'responseCode': status.HTTP_403_FORBIDDEN,
                     'message': 'You are not authorized to delete this entry',
                     'data': None
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            # Store entry details before deletion for logging
+            # Store word details for logging before deletion
             word_kh = staging_entry.word_kh
             word_en = staging_entry.word_en
 
@@ -1505,10 +1633,10 @@ class StagingEntryDeleteView(APIView):
             )
 
             return Response({
-                'responseCode': status.HTTP_204_NO_CONTENT,
+                'responseCode': status.HTTP_200_OK,
                 'message': 'Staging entry deleted successfully',
                 'data': None
-            }, status=status.HTTP_204_NO_CONTENT)
+            })
 
         except Staging.DoesNotExist:
             return Response({
