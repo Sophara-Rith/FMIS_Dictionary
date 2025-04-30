@@ -2,6 +2,8 @@
 from rest_framework import serializers
 from django.utils import timezone
 from django.db.models import Q
+
+from users.models import User
 from .models import RelatedWord, Staging, Dictionary, WordType, Bookmark
 from users.views import convert_to_khmer_date
 
@@ -90,7 +92,12 @@ class StagingEntrySerializer(serializers.ModelSerializer):
         ]
 
     def get_created_by(self, obj):
-        return obj.created_by.username_kh if obj.created_by else None
+        try:
+            if obj.created_by:
+                return obj.created_by.username_kh
+            return None
+        except User.DoesNotExist:
+            return None
 
     def get_created_at(self, obj):
         return convert_to_khmer_date(obj.created_at.strftime('%d-%m-%Y')) if obj.created_at else None

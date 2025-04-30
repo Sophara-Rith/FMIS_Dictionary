@@ -1,5 +1,6 @@
 from venv import logger
 from .models import ActivityLog
+from datetime import datetime
 
 def log_activity(admin_user, action, target_user=None, word_kh=None, word_en=None):
     """
@@ -52,3 +53,29 @@ def log_activity(admin_user, action, target_user=None, word_kh=None, word_en=Non
         # Log the error with traceback for debugging
         logger.error(f"Failed to log activity: {str(e)}")
         logger.error(traceback.format_exc())
+
+def get_mobile_encryption_key():
+    """
+    Generate a dynamic encryption key based on current year and month
+    The template "Ajv!ndfjkhg0${current_year}g0sno%eu$rtg@nejog${current_month}" is fixed,
+    only the year and month values change.
+    """
+    # Get current year and month
+    current_year = datetime.now().strftime('%Y')  # Format: YYYY
+    current_month = datetime.now().strftime('%m')  # Format: MM
+
+    # Fixed template with placeholders
+    key_template = "Ajv!ndfjkhg0${current_year}g0sno%eu$rtg@nejog${current_month}"
+
+    # Replace placeholders with actual values
+    dynamic_key = key_template.replace("${current_year}", current_year).replace("${current_month}", current_month)
+
+    # Ensure the key is exactly 32 bytes (for AES-256)
+    if len(dynamic_key) < 32:
+        # Repeat the key pattern until it's at least 32 bytes
+        dynamic_key = (dynamic_key * ((32 // len(dynamic_key)) + 1))[:32]
+    elif len(dynamic_key) > 32:
+        # Truncate to exactly 32 bytes
+        dynamic_key = dynamic_key[:32]
+
+    return dynamic_key

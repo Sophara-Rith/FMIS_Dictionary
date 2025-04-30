@@ -24,6 +24,11 @@ from drf_yasg import openapi
 from .utils import log_activity
 from users import serializers
 
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+import base64
+import binascii
+
 User = get_user_model()
 
 logger = logging.getLogger(__name__)
@@ -562,25 +567,25 @@ class UserRegisterView(APIView):
             serializer = UserSerializer(data=request.data)
 
             if serializer.is_valid():
-                user = serializer.save()
+                new_user = serializer.save()
 
                 # Prepare response data
                 response_data = {
                     'username': username,
-                    'email': user.email,
-                    'role': user.role,
-                    'sex': user.sex or '',
-                    'username_kh': user.username_kh or '',
-                    'staff_id': user.staff_id or '',
-                    'position': user.position or '',
-                    'phone_number': user.phone_number or ''
+                    'email': new_user.email,
+                    'role': new_user.role,
+                    'sex': new_user.sex or '',
+                    'username_kh': new_user.username_kh or '',
+                    'staff_id': new_user.staff_id or '',
+                    'position': new_user.position or '',
+                    'phone_number': new_user.phone_number or ''
                 }
 
                 # Log the user creation activity
                 log_activity(
-                    user=request.user,
+                    admin_user=request.user,
                     action='USER_REGISTER',
-                    target_user=user
+                    target_user=new_user
                 )
 
                 return Response({
@@ -715,7 +720,7 @@ class UserDropView(APIView):
 
             # Log the user creation activity
             log_activity(
-                user=request.user,
+                admin_user=request.user,
                 action='USER_DELETE',
                 target_user=target_user
             )
@@ -1116,6 +1121,7 @@ class UserCommentView(APIView):
 
             if serializer.is_valid():
                 comment = serializer.save()
+
                 return Response({
                     'responseCode': status.HTTP_201_CREATED,
                     'message': 'Comment submitted successfully',
@@ -1580,8 +1586,8 @@ class MobileLoginView(APIView):
             properties={
                 'login_input': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="User's username",
-                    example="johndoe"
+                    description="User's username or email",
+                    example="fmis369.dic"
                 ),
                 'password': openapi.Schema(
                     type=openapi.TYPE_STRING,
@@ -1678,48 +1684,104 @@ class MobileLoginView(APIView):
     )
     @debug_error
     def post(self, request):
-        # Specific mobile login credentials
-        MOBILE_LOGIN_USERNAME = 'fmis369'
-        MOBILE_LOGIN_PASSWORD = 'Fmis@dic2O@$'
         # Extract parameters
         device_id = request.data.get('device_id')
         login_input = request.data.get('login_input')
-        password = request.data.get('password')
+        encrypted_password = request.data.get('password')
         device_name = request.data.get('device_name', '')
         device_type = request.data.get('device_type', '')
+
         # Validate required parameters
-        if not all([device_id, login_input, password]):
+        if not all([device_id, login_input, encrypted_password]):
             return Response({
                 'responseCode': status.HTTP_400_BAD_REQUEST,
                 'message': 'Missing required parameters',
                 'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
-        # Validate login credentials specifically for mobile
-        if (login_input != MOBILE_LOGIN_USERNAME or
-            password != MOBILE_LOGIN_PASSWORD):
-            return Response({
-                'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Invalid mobile credentials',
-                'data': None
-            }, status=status.HTTP_401_UNAUTHORIZED)
+
         try:
+
+            # Decrypt the device_id if it's encrypted
+            try:
+                # Check if device_id looks like base64 (potential encryption)
+                import re
+                if re.match(r'^[A-Za-z0-9+/]+={0,2}$', login_input):
+                    try:
+                        # Try to decrypt it
+                        login_input = self.decrypt_data(login_input)
+                        logger.info(f"Successfully decrypted login_input: {login_input}")
+                    except Exception as e:
+                        # If decryption fails, use as-is
+                        logger.warning(f"Device ID decryption failed, using as-is: {str(e)}")
+                        login_input = login_input
+                else:
+                    # Not base64, use as-is
+                    login_input = login_input
+
+            except Exception as e:
+                logger.error(f"Error processing login_input: {str(e)}")
+                login_input = login_input  # Fallback to using as-is
+
+            # Decrypt the device_id if it's encrypted
+            try:
+                # Check if device_id looks like base64 (potential encryption)
+                import re
+                if re.match(r'^[A-Za-z0-9+/]+={0,2}$', device_id):
+                    try:
+                        # Try to decrypt it
+                        device_id = self.decrypt_data(device_id)
+                        logger.info(f"Successfully decrypted device_id: {device_id}")
+                    except Exception as e:
+                        # If decryption fails, use as-is
+                        logger.warning(f"Device ID decryption failed, using as-is: {str(e)}")
+                        device_id = device_id
+                else:
+                    # Not base64, use as-is
+                    device_id = device_id
+
+            except Exception as e:
+                logger.error(f"Error processing device_id: {str(e)}")
+                device_id = device_id  # Fallback to using as-is
+
+            # Decrypt the password using OpenSSL-compatible method
+            try:
+                password = self.decrypt_data(encrypted_password)
+                logger.info("Successfully decrypted password")
+            except ValueError as e:
+                logger.error(f"Password decryption failed: {str(e)}")
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid encrypted password format',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Explicitly import User model
             from django.contrib.auth import get_user_model
             User = get_user_model()
-            # Find or create mobile user
-            user, created = User.objects.get_or_create(
-                username=MOBILE_LOGIN_USERNAME,
-                defaults={
-                    'email': f'{MOBILE_LOGIN_USERNAME}@mobile.app',
-                    'is_active': True
-                }
-            )
-            # Set password only if user is newly created
-            if created:
-                user.set_password(MOBILE_LOGIN_PASSWORD)
-                user.save()
+
+            # Check if the login input is the allowed mobile username or email
+            allowed_username = 'fmis369.dic'
+            allowed_email = 'fmis369.dic@fmis.gov.kh'
+
+            # Find the mobile user
+            mobile_user = None
+
+            # Try to find user by username or email
+            if login_input == allowed_username:
+                mobile_user = User.objects.filter(username=allowed_username).first()
+            elif login_input == allowed_email:
+                mobile_user = User.objects.filter(email=allowed_email).first()
+
+            # If user not found or credentials don't match
+            if not mobile_user or not mobile_user.check_password(password):
+                return Response({
+                    'responseCode': status.HTTP_401_UNAUTHORIZED,
+                    'message': 'Invalid mobile credentials',
+                    'data': None
+                }, status=status.HTTP_401_UNAUTHORIZED)
+
             # Generate tokens with custom method for precise control
-            access_token, refresh_token, token_expires_at = self.generate_mobile_tokens(user, device_id)
+            access_token, refresh_token, token_expires_at = self.generate_mobile_tokens(mobile_user, device_id)
 
             # Use UTC+7 for logging and other timestamp operations
             utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
@@ -1729,7 +1791,7 @@ class MobileLoginView(APIView):
             mobile_device, created = MobileDevice.objects.update_or_create(
                 device_id=device_id,  # This is the lookup field
                 defaults={  # These fields will be updated if the record exists
-                    'user': user,
+                    'user': mobile_user,
                     'device_name': device_name,
                     'device_type': device_type,
                     'access_token': access_token,
@@ -1747,13 +1809,10 @@ class MobileLoginView(APIView):
                 'data': {
                     'refresh': refresh_token,
                     'access': access_token,
-                    'device_id': device_id,
-                    'device_name': device_name,
-                    'device_type': device_type,
-                    'token_expires_at': token_expires_at.isoformat(),  # ISO format for consistent representation
-                    'current_time': current_time.isoformat()
+                    'device_id': device_id
                 }
             })
+
         except Exception as e:
             # Comprehensive error logging
             logger.error(f"Mobile Login Error: {str(e)}")
@@ -1763,32 +1822,114 @@ class MobileLoginView(APIView):
                 'message': 'Mobile login failed',
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            # Comprehensive error logging
+            logger.error(f"Mobile Login Error: {str(e)}")
+            logger.error(f"Error Details: {traceback.format_exc()}")
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Mobile login failed',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def decrypt_data(self, encrypted_password):
+        """
+        Decrypt OpenSSL-compatible AES-256 encrypted password
+        Format: "Salted__" + 8 bytes salt + ciphertext
+        """
+        try:
+            # Fixed passphrase from your example
+            passphrase = "Ajv!ndfjkhg02025g0sno%eu$rtg@nejog04"
+
+            # Decode the base64 encrypted data
+            encrypted_data = base64.b64decode(encrypted_password)
+
+            # Check if it's in OpenSSL format (starts with "Salted__")
+            if encrypted_data[:8] != b'Salted__':
+                logger.error("Not in OpenSSL format (missing 'Salted__' prefix)")
+                raise ValueError("Invalid encrypted format - not OpenSSL compatible")
+
+            # Extract salt (next 8 bytes after "Salted__")
+            salt = encrypted_data[8:16]
+
+            # Extract ciphertext (everything after salt)
+            ciphertext = encrypted_data[16:]
+
+            # Derive key and IV using OpenSSL's EVP_BytesToKey
+            # This is equivalent to OpenSSL's EVP_BytesToKey with MD5, one iteration
+            # We need 48 bytes (32 for key, 16 for IV)
+            key_iv = self._openssl_kdf(passphrase.encode(), salt, 48)
+            key = key_iv[:32]  # First 32 bytes for the key
+            iv = key_iv[32:48]  # Next 16 bytes for the IV
+
+            # Create AES cipher in CBC mode
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+
+            # Decrypt and unpad
+            decrypted_data = unpad(cipher.decrypt(ciphertext), AES.block_size)
+
+            # Return as string
+            return decrypted_data.decode('utf-8')
+
+        except (ValueError, binascii.Error, UnicodeDecodeError) as e:
+            logger.error(f"OpenSSL decryption error: {str(e)}")
+            raise ValueError(f"Invalid encrypted password format: {str(e)}")
+
+    def _openssl_kdf(self, password, salt, key_length):
+        """
+        Derive key using OpenSSL's EVP_BytesToKey with MD5, one iteration.
+        This is not the PBKDF2 that we typically recommend for new applications,
+        but this matches the default OpenSSL behavior.
+        """
+        from hashlib import md5
+
+        result = b''
+        prev = b''
+
+        # Keep generating key material until we have enough
+        while len(result) < key_length:
+            prev = md5(prev + password + salt).digest()
+            result += prev
+
+        # Return the desired key length
+        return result[:key_length]
+
     @staticmethod
     def generate_mobile_tokens(user, device_id):
         from rest_framework_simplejwt.tokens import RefreshToken
         from django.conf import settings
         from zoneinfo import ZoneInfo
         from datetime import datetime, timedelta
+
         # Use mobile-specific JWT settings
         mobile_settings = settings.MOBILE_JWT_SETTINGS
+
         # Create refresh token with mobile-specific lifetime
         refresh = RefreshToken.for_user(user)
+
         # Temporarily override token lifetimes for mobile
         original_access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
         original_refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
+
         try:
             # Override with mobile-specific settings
             settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'] = mobile_settings['ACCESS_TOKEN_LIFETIME']
             settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'] = mobile_settings['REFRESH_TOKEN_LIFETIME']
+
             # Add custom claims
             refresh['device_id'] = device_id
+
             # Calculate token expiration in UTC+7
             utc_plus_7 = ZoneInfo("Asia/Phnom_Penh")
             token_expires_at = datetime.now(utc_plus_7) + mobile_settings['ACCESS_TOKEN_LIFETIME']
+
             # Convert tokens to strings
             access_token = str(refresh.access_token)
             refresh_token = str(refresh)
+
             return access_token, refresh_token, token_expires_at
+
         finally:
             # Restore original JWT settings
             settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'] = original_access_lifetime
@@ -1852,7 +1993,7 @@ class ChangePasswordView(APIView):
         if not user.check_password(current_password):
             return Response({
                 'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'Current password is incorrect',
+                'message': 'current_password is incorrect',
                 'data': None
             }, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -1860,7 +2001,7 @@ class ChangePasswordView(APIView):
         if new_password != confirm_password:
             return Response({
                 'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'New passwords do not match',
+                'message': 'confirm_password do not match',
                 'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1868,7 +2009,7 @@ class ChangePasswordView(APIView):
         if current_password == new_password:
             return Response({
                 'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'New password must be different from current password',
+                'message': 'new_password must be different from current_password',
                 'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
 

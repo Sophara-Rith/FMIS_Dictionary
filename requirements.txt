@@ -11,3 +11,4 @@ django_redis==5.4.0
 pandas==2.2.3
 celery==5.5.0
 pillow==11.1.0
+pycryptodome==3.22.0

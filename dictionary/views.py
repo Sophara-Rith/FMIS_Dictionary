@@ -701,7 +701,7 @@ class DictionaryUpdateView(APIView):
 
                 # Log the activity
                 log_activity(
-                    user=request.user,
+                    admin_user=request.user,
                     action='DICTIONARY_UPDATE',
                     word_kh=updated_entry.word_kh,
                     word_en=updated_entry.word_en
@@ -806,7 +806,7 @@ class StagingEntryListView(APIView):
         user_id = request.query_params.get('id')  # Changed from 'user_id' to 'id'
         review_status = request.query_params.get('review_status')
         page = int(request.query_params.get('page', 1))
-        per_page = int(request.query_params.get('per_page', 25))
+        per_page = int(request.query_params.get('per_page', 30000))
 
         # Validate and prepare user filtering
         try:
@@ -876,6 +876,7 @@ class StagingEntryListView(APIView):
                 'entries': serializer.data,
                 'total_entries': total_entries,
                 'page': page,
+                'per_page': per_page,
                 'total_pages': total_pages
             }
         }
@@ -1020,6 +1021,14 @@ class StagingEntryCreateView(APIView):
                         request.user
                     )
 
+                    # Log the activity using username_kh
+                    log_activity(
+                        admin_user=request.user,
+                        action='STAGING_CREATE',
+                        word_kh=staging_entry.word_kh,
+                        word_en=staging_entry.word_en
+                    )
+
                     return Response({
                         'responseCode': status.HTTP_201_CREATED,
                         'message': 'Dictionary entry created successfully',
@@ -1028,7 +1037,7 @@ class StagingEntryCreateView(APIView):
 
                 # Log the activity using username_kh
                 log_activity(
-                    user=request.user,
+                    admin_user=request.user,
                     action='STAGING_CREATE',
                     word_kh=staging_entry.word_kh,
                     word_en=staging_entry.word_en
@@ -1180,7 +1189,7 @@ class StagingEntryApproveView(APIView):
 
             # Log the activity
             log_activity(
-                user=request.user,
+                admin_user=request.user,
                 action='STAGING_APPROVE',
                 word_kh=staging_entry.word_kh,
                 word_en=staging_entry.word_en
@@ -1352,7 +1361,7 @@ class StagingEntryRejectView(APIView):
 
             # Log the activity
             log_activity(
-                user=request.user,
+                admin_user=request.user,
                 action='STAGING_REJECT',
                 word_kh=staging_entry.word_kh,
                 word_en=staging_entry.word_en
@@ -1546,7 +1555,7 @@ class StagingEntryUpdateView(APIView):
 
                 # Log the activity
                 log_activity(
-                    user=request.user,
+                    admin_user=request.user,
                     action='STAGING_UPDATE',
                     word_kh=serializer.data.get('word_kh'),
                     word_en=serializer.data.get('word_en')
@@ -1626,7 +1635,7 @@ class StagingEntryDeleteView(APIView):
 
             # Log the activity
             log_activity(
-                user=request.user,
+                admin_user=request.user,
                 action='STAGING_DELETE',
                 word_kh=word_kh,
                 word_en=word_en
