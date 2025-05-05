@@ -20,15 +20,9 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     '172.18.48.1',
-    '172.23.23.48'
+    '172.23.23.48',
+    'tops-dolphin-able.ngrok-free.app'
 ]
-# CORS_ALLOWED_ORIGINS = [
-#     'http://localhost:8012',
-#     'http://127.0.0.1:3030',
-#     'http://172.23.23.48:9991',
-#     'http://localhost',
-#     'http://127.0.0.1'
-# ]
 
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -49,17 +43,18 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'contenttype',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True   #Develop stage only
+# CORS_ALLOW_ALL_ORIGINS = True   #Develop stage only
 CORS_ALLOW_CREDENTIALS = True
 
 # CORS Configuration
-# def clean_cors_origins(origins_string):
-#     origins = origins_string.split(',')
-#     return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
+def clean_cors_origins(origins_string):
+    origins = origins_string.split(',')
+    return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
 
-# CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
+CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
 
 # Custom user model
 AUTH_USER_MODEL = 'users.User'
@@ -200,6 +195,9 @@ MOBILE_JWT_SETTINGS = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
 }
+
+# Expire time for inactive token
+TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', 90)))
 
 # Swagger config
 SWAGGER_SETTINGS = {

@@ -1700,7 +1700,7 @@ class MobileLoginView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-
+            # use OpenSSL-compatible AES-256 encryption
             # Decrypt the device_id if it's encrypted
             try:
                 # Check if device_id looks like base64 (potential encryption)
@@ -1839,8 +1839,16 @@ class MobileLoginView(APIView):
         Format: "Salted__" + 8 bytes salt + ciphertext
         """
         try:
-            # Fixed passphrase from your example
-            passphrase = "Ajv!ndfjkhg02025g0sno%eu$rtg@nejog04"
+
+            # Get current year and month
+            current_year = datetime.now().strftime('%Y')  # Format: YYYY
+            current_month = datetime.now().strftime('%m')  # Format: MM
+
+            # Fixed template with placeholders
+            key_template = "Ajv!ndfjkhg0${current_year}g0sno%eu$rtg@nejog${current_month}"
+
+            # Replace placeholders with actual values
+            dynamic_key = key_template.replace("${current_year}", current_year).replace("${current_month}", current_month)
 
             # Decode the base64 encrypted data
             encrypted_data = base64.b64decode(encrypted_password)
@@ -1859,7 +1867,7 @@ class MobileLoginView(APIView):
             # Derive key and IV using OpenSSL's EVP_BytesToKey
             # This is equivalent to OpenSSL's EVP_BytesToKey with MD5, one iteration
             # We need 48 bytes (32 for key, 16 for IV)
-            key_iv = self._openssl_kdf(passphrase.encode(), salt, 48)
+            key_iv = self._openssl_kdf(dynamic_key.encode(), salt, 48)
             key = key_iv[:32]  # First 32 bytes for the key
             iv = key_iv[32:48]  # Next 16 bytes for the IV
 

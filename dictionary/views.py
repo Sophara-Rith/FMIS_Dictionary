@@ -1,5 +1,6 @@
 # dictionary/views.py
 from datetime import datetime
+import json
 import math
 import threading
 import time
@@ -7,6 +8,8 @@ import logging
 from functools import wraps, reduce
 import operator
 import hashlib
+import traceback
+import uuid
 import pandas as pd
 import os
 from rest_framework import status
@@ -15,12 +18,14 @@ from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle, AnonRateThrottle
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from django.utils import timezone
 from django.http import FileResponse
 from django.core.cache import cache
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db.models import Q, Max, Case, When, Value, IntegerField, Prefetch
 
 from users.models import User, ActivityLog
@@ -32,7 +37,7 @@ from .serializers import (
     StagingEntryCreateSerializer,
 )
 from debug_utils import debug_error
-from .tasks import process_staging_bulk_import
+from .tasks import process_staging_bulk_import_sync
 from .utils import DictionaryTemplateGenerator
 from users.utils import log_activity
 from dictionary import models
@@ -113,8 +118,22 @@ class DictionaryEntryListView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="List all approved dictionary entries",
+        operation_description="List all approved dictionary entries with pagination and optimization",
         manual_parameters=[
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number for pagination",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Number of entries per page",
+                type=openapi.TYPE_INTEGER,
+                default=100
+            ),
             openapi.Parameter(
                 'language',
                 openapi.IN_QUERY,
@@ -132,39 +151,107 @@ class DictionaryEntryListView(APIView):
             200: openapi.Response(
                 description='Successful retrieval of dictionary entries',
                 schema=openapi.Schema(
-                    type=openapi.TYPE_ARRAY,
-                    items=openapi.Schema(
-                        type=openapi.TYPE_OBJECT,
-                        properties={
-                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                            'word': openapi.Schema(type=openapi.TYPE_STRING),
-                            'definition': openapi.Schema(type=openapi.TYPE_STRING),
-                            'language': openapi.Schema(type=openapi.TYPE_STRING),
-                        }
-                    )
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'entries': openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(type=openapi.TYPE_OBJECT)
+                                ),
+                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
+                            }
+                        )
+                    }
                 )
             )
         }
     )
     @debug_error
     def get(self, request):
-        # Get query parameters
-        language = request.query_params.get('language')
-        search = request.query_params.get('search')
+        try:
+            # Get query parameters with defaults
+            page = max(1, int(request.query_params.get('page', 1)))
+            per_page = max(1, min(int(request.query_params.get('per_page', 100)), 500))
+            language = request.query_params.get('language')
+            search = request.query_params.get('search')
 
-        # Base queryset
-        entries = Dictionary.objects.all()
+            # Base queryset with optimization
+            entries_query = Dictionary.objects.filter(is_deleted=False).annotate(
+                parent_priority=Case(
+                    When(is_parent=True, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField()
+                )
+            ).order_by('parent_priority', 'id')
 
-        # Apply filters
-        if language:
-            entries = entries.filter(language=language)
+            # Apply language filter if provided
+            if language:
+                if language == 'kh':
+                    entries_query = entries_query.filter(word_kh__isnull=False)
+                elif language == 'en':
+                    entries_query = entries_query.filter(word_en__isnull=False)
 
-        if search:
-            entries = entries.filter(word__icontains=search)
+            # Apply search filter if provided
+            if search:
+                entries_query = entries_query.filter(
+                    Q(word_kh__icontains=search) |
+                    Q(word_en__icontains=search)
+                )
 
-        # Serialize and return
-        serializer = DictionaryEntrySerializer(entries, many=True)
-        return Response(serializer.data)
+            # Prefetch related words for parent entries
+            entries_query = entries_query.prefetch_related(
+                Prefetch(
+                    'child_words',
+                    queryset=RelatedWord.objects.select_related('child_word'),
+                    to_attr='prefetched_child_words'
+                )
+            )
+
+            # Calculate pagination
+            total_entries = entries_query.count()
+            total_pages = (total_entries + per_page - 1) // per_page
+
+            # Apply pagination
+            start = (page - 1) * per_page
+            end = start + per_page
+            entries = entries_query[start:end]
+
+            # Serialize entries
+            serializer = DictionaryEntrySerializer(
+                entries,
+                many=True,
+                context={'request': request}
+            )
+
+            # Prepare response
+            response_data = {
+                'entries': serializer.data,
+                'total_entries': total_entries,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': total_pages
+            }
+
+            return Response({
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Dictionary entries retrieved successfully',
+                'data': response_data
+            })
+
+        except Exception as e:
+            logger.error(f"Dictionary list error: {str(e)}", exc_info=True)
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'An error occurred while retrieving dictionary entries',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class DictionaryEntryDetailView(APIView):
     permission_classes = [IsAuthenticated]
@@ -803,85 +890,90 @@ class StagingEntryListView(APIView):
     @debug_error
     def get(self, request):
         # Get query parameters
-        user_id = request.query_params.get('id')  # Changed from 'user_id' to 'id'
-        review_status = request.query_params.get('review_status')
-        page = int(request.query_params.get('page', 1))
-        per_page = int(request.query_params.get('per_page', 30000))
+        user_id = request.query_params.get('id')
 
-        # Validate and prepare user filtering
+        # Validate and convert page and per_page
         try:
-            # If user_id is provided, ensure proper access
-            if user_id:
-                user_id = int(user_id)
-
-                # Check if the requested user matches the current user
-                # or if the current user is an ADMIN/SUPERUSER
-                if (user_id != request.user.id and
-                    request.user.role not in ['ADMIN', 'SUPERUSER']):
-                    return Response({
-                        'responseCode': status.HTTP_403_FORBIDDEN,
-                        'message': 'You are not authorized to view this user\'s entries',
-                        'data': None
-                    }, status=status.HTTP_403_FORBIDDEN)
-
-                # Find the user by ID to get the username
-                try:
-                    target_user = User.objects.get(id=user_id)
-                except User.DoesNotExist:
-                    return Response({
-                        'responseCode': status.HTTP_400_BAD_REQUEST,
-                        'message': 'User not found',
-                        'data': None
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-        except (TypeError, ValueError):
+            page = max(1, int(request.query_params.get('page', 1)))
+            per_page = max(1, int(request.query_params.get('per_page', 30000)))
+            review_status = request.query_params.get('review_status')
+        except ValueError:
             return Response({
                 'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'Invalid user ID format',
+                'message': 'Invalid page or per_page parameter',
                 'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Base queryset
-        entries = Staging.objects.all().order_by('-created_at')
+        # When no ID is provided, only Admin/SuperUser can access all entries
+        if not user_id:
+            if request.user.role not in ['ADMIN', 'SUPERUSER']:
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'Only Admin/SuperUser can view all staging entries',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
 
-        # Apply user filter by username (not ID)
-        if user_id:
-            entries = entries.filter(created_by__username_kh=target_user.username_kh)
+            # Fetch all staging entries for Admin/SuperUser
+            staging_entries = Staging.objects.all().order_by('-created_at')
 
-        # Apply review_status filter
-        if review_status:
-            entries = entries.filter(review_status=review_status)
+        else:
+            # Convert user_id to integer
+            try:
+                user_id = int(user_id)
+            except ValueError:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid user ID format',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Pagination
-        total_entries = entries.count()
-        total_pages = math.ceil(total_entries / per_page)
+            # Check user permissions for specific user ID
+            if (user_id != request.user.id and
+                request.user.role not in ['ADMIN', 'SUPERUSER']):
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'You do not have permission to view this user\'s staging entries',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
 
-        # Slice entries for current page
+            # Fetch staging entries for the specific user
+            staging_entries = Staging.objects.filter(created_by_id=user_id).order_by('-created_at')
+
+            # Apply review_status filter
+            if review_status:
+                entries = entries.filter(review_status=review_status)
+
+        # Manual Pagination
+        total_entries = staging_entries.count()
+        total_pages = (total_entries + per_page - 1) // per_page
+
+        # Check if requested page is out of range
+        if page > total_pages and total_pages > 0:
+            return Response({
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'Page number out of range',
+                'data': None
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Apply pagination
         start = (page - 1) * per_page
         end = start + per_page
-        paginated_entries = entries[start:end]
+        paginated_entries = staging_entries[start:end]
 
-        # Serialize entries
-        serializer = StagingEntrySerializer(
-            paginated_entries,
-            many=True,
-            context={'request': request}
-        )
+        # Serialize the entries
+        serializer = StagingEntrySerializer(paginated_entries, many=True)
 
-        # Prepare response
-        response_data = {
+        return Response({
             'responseCode': status.HTTP_200_OK,
             'message': 'Staging entries retrieved successfully',
             'data': {
                 'entries': serializer.data,
                 'total_entries': total_entries,
-                'page': page,
-                'per_page': per_page,
-                'total_pages': total_pages
+                'total_pages': total_pages,
+                'current_page': page,
+                'per_page': per_page
             }
-        }
-
-        return Response(response_data)
+        })
 
 class StagingEntryCreateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -973,6 +1065,19 @@ class StagingEntryCreateView(APIView):
             # Prepare data for staging entry
             staging_data = serializer.validated_data.copy()
 
+            # Check for existing entry in staging
+            existing_staging_entry = Staging.objects.filter(
+                Q(word_en=staging_data.get('word_en')) &
+                Q(word_kh=staging_data.get('word_kh'))
+            ).first()
+
+            if existing_staging_entry:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'An entry with this word already exists in staging',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Determine review status and related fields
             if is_admin_or_superuser:
                 # For ADMIN/SUPERUSER: Automatically approve
@@ -987,18 +1092,6 @@ class StagingEntryCreateView(APIView):
 
             # Create staging entry
             try:
-                # Check for existing entry in staging
-                existing_staging_entry = Staging.objects.filter(
-                    Q(word_en=staging_data.get('word_en')) &
-                    Q(word_kh=staging_data.get('word_kh'))
-                ).first()
-
-                if existing_staging_entry:
-                    return Response({
-                        'responseCode': status.HTTP_400_BAD_REQUEST,
-                        'message': 'An entry with this word already exists in staging',
-                        'data': None
-                    }, status=status.HTTP_400_BAD_REQUEST)
 
                 # Create staging entry
                 staging_entry = Staging.objects.create(
@@ -1709,18 +1802,10 @@ class StagingBulkImportView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'successful_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'failed_entries': openapi.Schema(
-                            type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(
-                                type=openapi.TYPE_OBJECT,
-                                properties={
-                                    'row': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                    'errors': openapi.Schema(type=openapi.TYPE_OBJECT)
-                                }
-                            )
-                        )
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'task_id': openapi.Schema(type=openapi.TYPE_STRING),
+                        'activity_log_id': openapi.Schema(type=openapi.TYPE_INTEGER)
                     }
                 )
             ),
@@ -1729,49 +1814,85 @@ class StagingBulkImportView(APIView):
     )
     @debug_error
     def post(self, request):
-        # Validate file upload
-        if 'file' not in request.FILES:
-            return Response(
-                {'error': 'No file uploaded'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        excel_file = request.FILES['file']
-
-        # Validate file type
-        if not excel_file.name.endswith(('.xlsx', '.xls')):
-            return Response(
-                {'error': 'Invalid file type. Please upload an Excel file.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         try:
-            # Read Excel file
-            df = pd.read_excel(excel_file)
-
-            # Attempt to rename columns using the mapping
-            try:
-                # If Khmer headers are used
-                if any(col in self.COLUMN_NAME_MAPPING for col in df.columns):
-                    df.rename(columns=self.COLUMN_NAME_MAPPING, inplace=True)
-
-                # Validate column names
-                if list(df.columns) != self.EXPECTED_COLUMNS:
-                    return Response({
-                        'error': 'Column names do not match the template. Do not modify headers!',
-                        'expected_columns': self.EXPECTED_COLUMNS,
-                        'actual_columns': list(df.columns)
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-            except Exception as column_error:
+            # Validate file upload
+            if 'file' not in request.FILES:
                 return Response({
-                    'error': f'Column mapping error: {str(column_error)}',
-                    'expected_columns': self.EXPECTED_COLUMNS,
-                    'actual_columns': list(df.columns)
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'No file uploaded',
+                    'data': {'error': 'File is required for bulk import'}
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            excel_file = request.FILES['file']
+
+            # Validate file type
+            if not excel_file.name.endswith(('.xlsx', '.xls')):
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid file type',
+                    'data': {'error': 'Please upload an Excel file (.xlsx or .xls)'}
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Save temporary file
+            temp_file_path = os.path.join(
+                settings.MEDIA_ROOT,
+                'temp_imports',
+                f'{uuid.uuid4()}_{excel_file.name}'
+            )
+            os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
+
+            with open(temp_file_path, 'wb+') as destination:
+                for chunk in excel_file.chunks():
+                    destination.write(chunk)
+
+            # Read Excel file
+            try:
+                df = pd.read_excel(temp_file_path)
+                df.rename(columns=self.COLUMN_NAME_MAPPING, inplace=True)
+            except Exception as read_error:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Error reading Excel file',
+                    'data': {
+                        'total_entries': 1,
+                        'successful_entries': 0,
+                        'failed_entries': [{
+                            'row': 1,
+                            'word_kh': '',
+                            'word_en': '',
+                            'errors': {
+                                'non_field_errors': [str(read_error)]
+                            }
+                        }]
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validate column structure
+            if list(df.columns) != self.EXPECTED_COLUMNS:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid column structure',
+                    'data': {
+                        'total_entries': 1,
+                        'successful_entries': 0,
+                        'failed_entries': [{
+                            'row': 1,
+                            'word_kh': '',
+                            'word_en': '',
+                            'errors': {
+                                'non_field_errors': [
+                                    'Column names do not match the template',
+                                    f'Expected columns: {self.EXPECTED_COLUMNS}',
+                                    f'Actual columns: {list(df.columns)}'
+                                ]
+                            }
+                        }]
+                    }
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             # Prepare results tracking
-            successful_entries = []
+            total_entries = len(df)
+            successful_entries = 0
             failed_entries = []
 
             # Process each row
@@ -1797,44 +1918,269 @@ class StagingBulkImportView(APIView):
                         context={'request': request}
                     )
 
-                    if serializer.is_valid():
-                        # Save the staging entry
-                        staging_entry = serializer.save()
-                        successful_entries.append({
-                            'row': index + 2,  # Excel rows start at 1, add header
-                            'word_kh': staging_entry.word_kh,
-                            'word_en': staging_entry.word_en
-                        })
-                    else:
-                        # Collect validation errors
-                        failed_entries.append({
-                            'row': index + 2,
+                    if not serializer.is_valid():
+                        # Collect validation errors in the specified format
+                        failed_entry = {
+                            'row': index + 1,  # Excel rows start at 1, add header
+                            'word_kh': row['word_kh'],
+                            'word_en': row['word_en'],
                             'errors': serializer.errors
-                        })
+                        }
+                        failed_entries.append(failed_entry)
+                    else:
+                        # Save the staging entry
+                        serializer.save()
+                        successful_entries += 1
 
                 except Exception as entry_error:
                     # Catch any unexpected errors during entry processing
-                    failed_entries.append({
-                        'row': index + 2,
-                        'errors': str(entry_error)
-                    })
+                    failed_entry = {
+                        'row': index + 1,
+                        'word_kh': row['word_kh'],
+                        'word_en': row['word_en'],
+                        'errors': {
+                            'non_field_errors': [str(entry_error)]
+                        }
+                    }
+                    failed_entries.append(failed_entry)
 
-            # Prepare and return response
+            # If there are any failed entries, return validation failed response
+            if failed_entries:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Validation failed',
+                    'data': {
+                        'total_entries': total_entries,
+                        'successful_entries': successful_entries,
+                        'failed_entries': failed_entries
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Successful import
             return Response({
-                'total_entries': len(df),
-                'successful_entries': len(successful_entries),
-                'successful_details': successful_entries,
-                'failed_entries': failed_entries
-            }, status=status.HTTP_200_OK if len(failed_entries) < len(df) else status.HTTP_400_BAD_REQUEST)
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Dictionary entries imported successfully',
+                'data': {
+                    'total_entries': total_entries,
+                    'successful_entries': successful_entries,
+                    'failed_entries': []
+                }
+            }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            # Log the full error for debugging
-            logger.error(f"Bulk import error: {str(e)}", exc_info=True)
-
+            # Handle any unexpected errors
             return Response({
-                'error': 'An error occurred during file processing',
-                'details': str(e)
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Validation failed',
+                'data': {
+                    'total_entries': 1,
+                    'successful_entries': 0,
+                    'failed_entries': [{
+                        'row': 1,
+                        'word_kh': '',
+                        'word_en': '',
+                        'errors': {
+                            'non_field_errors': [str(e)]
+                        }
+                    }]
+                }
             }, status=status.HTTP_400_BAD_REQUEST)
+
+    def process_staging_bulk_import_local(self, file_path, user, activity_log):
+        """
+        Local synchronous processing method for bulk import
+        Completely offline and does not rely on any network resources
+        """
+        # Read Excel file
+        df = pd.read_excel(file_path)
+        df.rename(columns=self.COLUMN_NAME_MAPPING, inplace=True)
+
+        # Prepare results tracking
+        import_results = {
+            'total_entries': len(df),
+            'successful_entries': 0,
+            'failed_entries': [],
+        }
+
+        # Process each row
+        for index, row in df.iterrows():
+            try:
+                # Prepare staging data
+                staging_data = {
+                    'word_kh': row['word_kh'],
+                    'word_kh_type': row['word_kh_type'],
+                    'word_kh_definition': row['word_kh_definition'],
+                    'word_en': row['word_en'],
+                    'word_en_type': row['word_en_type'],
+                    'word_en_definition': row['word_en_definition'],
+                    'pronunciation_kh': row.get('pronunciation_kh', ''),
+                    'pronunciation_en': row.get('pronunciation_en', ''),
+                    'example_sentence_kh': row.get('example_sentence_kh', ''),
+                    'example_sentence_en': row.get('example_sentence_en', '')
+                }
+
+                # Validate and save each entry
+                serializer = StagingEntryCreateSerializer(
+                    data=staging_data,
+                    context={'request': type('Request', (), {'user': user})()}
+                )
+
+                if serializer.is_valid():
+                    # Save staging entry
+                    staging_entry = serializer.save(created_by=user)
+                    import_results['successful_entries'] += 1
+
+                    # Optional: Process word relationships for admin/superuser
+                    if user.role in ['ADMIN', 'SUPERUSER']:
+                        # Change this line to match the method name in the class
+                        self._process_staging_word_relationships(staging_entry)
+                else:
+                    import_results['failed_entries'].append({
+                        'row': index + 1,
+                        'word_kh': row['word_kh'],
+                        'word_en': row['word_en'],
+                        'errors': serializer.errors
+                    })
+            except Exception as row_error:
+                import_results['failed_entries'].append({
+                    'row': index + 1,
+                    'word_kh': row.get('word_kh', ''),
+                    'word_en': row.get('word_en', ''),
+                    'errors': str(row_error)
+                })
+
+        return import_results
+
+    def _process_staging_word_relationships(self, staging_entry):
+        """
+        Process word relationships ONLY for ADMIN/SUPERUSER
+        """
+        words = staging_entry.word_en.split()
+
+        # Single word scenario
+        if len(words) == 1:
+            staging_entry.is_parent = True
+            staging_entry.is_child = False
+            staging_entry.save()
+            return
+
+        # Multi-word scenario
+        staging_entry.is_parent = False
+
+        # Check for potential parent words in Dictionary
+        potential_parents = Dictionary.objects.filter(
+            Q(word_en__in=words) & Q(is_parent=True)
+        )
+
+        if potential_parents.exists():
+            # This is likely a compound or derived word
+            staging_entry.is_child = True
+        else:
+            # No existing parent words found
+            staging_entry.is_parent = len(words) > 1
+            staging_entry.is_child = not staging_entry.is_parent
+
+        staging_entry.save()
+
+    def _process_related_words(self, new_word, staging_entry):
+        """
+        Process related words ONLY for ADMIN/SUPERUSER
+        """
+        # Ensure mutually exclusive parent/child status
+        if staging_entry.is_parent:
+            new_word.is_parent = True
+            new_word.is_child = False
+        elif staging_entry.is_child:
+            new_word.is_parent = False
+            new_word.is_child = True
+
+        new_word.save()
+
+        # Find and link related words
+        words = staging_entry.word_en.split()
+
+        # Check for parent words
+        for word in words:
+            parent_word = Dictionary.objects.filter(word_en=word, is_parent=True).first()
+            if parent_word:
+                # Create RelatedWord entry
+                RelatedWord.objects.get_or_create(
+                    parent_word=parent_word,
+                    child_word=new_word,
+                    defaults={
+                        'relationship_type': 'COMPOUND'
+                    }
+                )
+
+    def _create_dictionary_entry(self, data, user, staging_entry=None):
+        """
+        Create Dictionary entry directly for ADMIN/SUPERUSER
+
+        Args:
+        - data: Dictionary of entry data
+        - user: User creating the entry
+        - staging_entry: Optional Staging entry for relationship processing
+        """
+        # Check for existing entry to prevent duplicates
+        existing_entry = Dictionary.objects.filter(
+            word_kh=data.get('word_kh', ''),
+            word_en=data.get('word_en', '')
+        ).first()
+
+        if existing_entry:
+            raise DRFValidationError({
+                'non_field_errors': ['The fields word_kh, word_en must make a unique set.']
+            })
+
+        # Generate next index
+        next_index = self._generate_unique_index()
+
+        # Determine parent-child status
+        is_parent = False
+        is_child = False
+
+        if staging_entry:
+            is_parent = staging_entry.is_parent
+            is_child = staging_entry.is_child
+        else:
+            # Fallback logic for parent-child detection if no staging entry
+            words = data.get('word_en', '').split()
+            is_parent = len(words) == 1 or not Dictionary.objects.filter(
+                Q(word_en__in=words) & Q(is_parent=True)
+            ).exists()
+            is_child = not is_parent
+
+        # Create Dictionary entry
+        dictionary_entry = Dictionary.objects.create(
+            index=next_index,
+            word_kh=data.get('word_kh', ''),
+            word_en=data.get('word_en', ''),
+            word_kh_type=data.get('word_kh_type', ''),
+            word_en_type=data.get('word_en_type', ''),
+            word_kh_definition=data.get('word_kh_definition', ''),
+            word_en_definition=data.get('word_en_definition', ''),
+            pronunciation_kh=data.get('pronunciation_kh', ''),
+            pronunciation_en=data.get('pronunciation_en', ''),
+            example_sentence_kh=data.get('example_sentence_kh', ''),
+            example_sentence_en=data.get('example_sentence_en', ''),
+            created_by=user,
+            is_parent=is_parent,
+            is_child=is_child,
+            is_deleted= 0
+        )
+
+        # Process related words if staging entry is provided and user is ADMIN/SUPERUSER
+        if staging_entry and user.role in ['ADMIN', 'SUPERUSER']:
+            self._process_related_words(dictionary_entry, staging_entry)
+
+        return dictionary_entry
+
+    def _generate_unique_index(self):
+        """
+        Generate a unique index for Dictionary entries
+        """
+        max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
+        return max_index + 1
 
     def validate_import_data(self, df):
         """
@@ -1899,52 +2245,38 @@ class DictionaryTemplateDownloadView(APIView):
         Generate and provide downloadable Excel template
         """
         try:
-            # Ensure MEDIA_ROOT is configured
-            if not hasattr(settings, 'MEDIA_ROOT'):
-                raise ValueError("MEDIA_ROOT is not configured in settings")
+            # Get a temporary directory
+            import tempfile
+            import os
+            import io
 
-            # Create media directory if it doesn't exist
-            media_dir = settings.MEDIA_ROOT
-            os.makedirs(media_dir, exist_ok=True)
-
-            # Create import templates subdirectory
-            templates_dir = os.path.join(media_dir, 'import_templates')
-            os.makedirs(templates_dir, exist_ok=True)
-
-            # Generate template with explicit directory
-            template_path = DictionaryTemplateGenerator.generate_template(
-                output_dir=templates_dir
-            )
-
-            # Validate template file exists
-            if not os.path.exists(template_path):
-                raise FileNotFoundError(f"Template file not generated: {template_path}")
-
-            # Open file for reading
-            try:
-                template_file = open(template_path, 'rb')
-            except IOError as io_err:
-                logger.error(f"Failed to open template file: {io_err}")
-                return Response(
-                    {
-                        'error': 'Failed to access template file',
-                        'details': str(io_err)
-                    },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            # Create a temporary directory
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Generate template in the temporary directory
+                template_path = DictionaryTemplateGenerator.generate_template(
+                    output_dir=temp_dir
                 )
 
-            # Return file response
-            response = FileResponse(
-                template_file,
-                as_attachment=True,
-                filename='dictionary_import_template.xlsx'
-            )
-            return response
+                # Validate template file exists
+                if not os.path.exists(template_path):
+                    raise FileNotFoundError(f"Template file not generated: {template_path}")
+
+                # Open the file and read its content
+                with open(template_path, 'rb') as template_file:
+                    file_content = template_file.read()
+
+                # Return file response
+                response = FileResponse(
+                    io.BytesIO(file_content),
+                    as_attachment=True,
+                    filename='dictionary_import_template.xlsx'
+                )
+
+                return response
 
         except Exception as e:
             # Log the full error details
             logger.error(f"Template Generation Error: {str(e)}", exc_info=True)
-
             return Response(
                 {
                     'error': 'Failed to generate template',

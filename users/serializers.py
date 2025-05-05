@@ -5,6 +5,8 @@ from django.contrib.auth import authenticate
 from django.db.models import Max
 import re
 from .models import User, UserComment
+##############################################################
+
 
 def format_phone_number(phone_number):
     """
@@ -28,7 +30,6 @@ def format_phone_number(phone_number):
             cleaned_number[3:6],  # Next 3 digits
             cleaned_number[6:]    # Remaining digits
         ])
-
 
 class LoginSerializer(serializers.Serializer):
     """

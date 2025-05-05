@@ -140,6 +140,40 @@ class StagingEntryCreateSerializer(serializers.ModelSerializer):
         """
         Automatically map Khmer word type to English word type
         """
+        # Validate word types
+        valid_kh_types = [type[0] for type in WordType.WORD_TYPE_CHOICES_KH]
+        valid_en_types = [type[0] for type in WordType.WORD_TYPE_CHOICES_EN]
+
+        # Validate Khmer word type
+        if data.get('word_kh_type') not in valid_kh_types:
+            raise serializers.ValidationError({
+                'word_kh_type': "Invalid Khmer word type"
+            })
+
+        # Validate English word type
+        if data.get('word_en_type') not in valid_en_types:
+            raise serializers.ValidationError({
+                'word_en_type': "Invalid English word type"
+            })
+
+        # Check for unique combination of word_kh and word_en
+        existing_staging = Staging.objects.filter(
+            word_kh=data['word_kh'],
+            word_en=data['word_en']
+        ).exists()
+
+        existing_dictionary = Dictionary.objects.filter(
+            word_kh=data['word_kh'],
+            word_en=data['word_en']
+        ).exists()
+
+        if existing_staging or existing_dictionary:
+            raise serializers.ValidationError({
+                'non_field_errors': [
+                    "The fields word_kh, word_en must make a unique set."
+                ]
+            })
+
         # Check if Khmer word type is provided
         kh_type = data.get('word_kh_type')
 

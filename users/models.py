@@ -266,6 +266,7 @@ class ActivityLog(models.Model):
         ('DICTIONARY_CREATE', 'Dictionary Word Created'),
         ('DICTIONARY_UPDATE', 'Dictionary Word Updated'),
         ('DICTIONARY_DELETE', 'Dictionary Word Deleted'),
+        ('DICTIONARY_BULK_IMPORT', 'Dictionary Bulk Import'),
 
         # User Actions
         ('USER_REGISTER', 'User Registered'),
@@ -273,6 +274,13 @@ class ActivityLog(models.Model):
         ('USER_DELETE', 'User Deleted'),
         ('USER_LOGIN', 'User Logged In'),
         ('USER_PASSWORD_CHANGE', 'User Changed Password'),
+
+        #Bulk Import
+        ('INITIATED', 'Initiated'),
+        ('PROCESSING', 'Processing'),
+        ('COMPLETED', 'Completed'),
+        ('COMPLETED_WITH_ERRORS', 'Completed with Errors'),
+        ('FAILED', 'Failed')
     ]
 
     ROLES = [
@@ -288,7 +296,7 @@ class ActivityLog(models.Model):
         related_name='activity_logs'
     )
     username_kh = models.CharField(max_length=255, null=True, blank=True)
-    action = models.CharField(max_length=20, choices=ACTIONS)
+    action = models.CharField(max_length=255, choices=ACTIONS)
     role = models.CharField(max_length=10, choices=ROLES)
     timestamp = models.DateTimeField(auto_now_add=True)
 

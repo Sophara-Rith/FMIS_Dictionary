@@ -1,4 +1,5 @@
 # dictionary/models.py
+import json
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
@@ -170,6 +171,14 @@ class Staging(models.Model):
             models.Index(fields=['is_parent']),
             models.Index(fields=['is_child'])
         ]
+
+    def set_action_details(self, data):
+        """Helper method to set action details"""
+        self.action_details = json.dumps(data)
+
+    def get_action_details(self):
+        """Helper method to retrieve action details"""
+        return json.loads(self.action_details) if self.action_details else {}
 
     def __str__(self):
         return f"{self.word_kh} ({self.word_en})"
