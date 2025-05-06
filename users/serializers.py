@@ -4,32 +4,9 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
 from django.db.models import Max
 import re
+
+from .utils import convert_to_khmer_date, format_phone_number
 from .models import User, UserComment
-##############################################################
-
-
-def format_phone_number(phone_number):
-    """
-    Format phone number by splitting into groups of 3 digits
-    """
-    # Remove any existing spaces or non-digit characters
-    cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
-
-    # Handle different phone number lengths
-    if len(cleaned_number) < 9:
-        return cleaned_number  # Return original if too short
-
-    # Different formatting based on number length
-    if len(cleaned_number) == 9:
-        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
-    elif len(cleaned_number) == 10:
-        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
-    else:
-        return ' '.join([
-            cleaned_number[:3],  # First 3 digits
-            cleaned_number[3:6],  # Next 3 digits
-            cleaned_number[6:]    # Remaining digits
-        ])
 
 class LoginSerializer(serializers.Serializer):
     """
@@ -383,6 +360,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class UserCommentSerializer(serializers.ModelSerializer):
     username = serializers.SerializerMethodField()
+    created_at = serializers.SerializerMethodField()
 
     class Meta:
         model = UserComment
@@ -390,6 +368,7 @@ class UserCommentSerializer(serializers.ModelSerializer):
             'id',
             'username',
             'detail',
+            'user_id',
             'device_id',
             'created_at',
             'is_reviewed'
@@ -397,7 +376,10 @@ class UserCommentSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
     def get_username(self, obj):
-        return obj.user.username
+        return obj.user.username if obj.user else None
+
+    def get_created_at(self, obj):
+        return convert_to_khmer_date(obj.created_at.strftime('%d-%m-%Y')) if obj.created_at else None
 
 class UserCommentSubmitSerializer(serializers.ModelSerializer):
     """

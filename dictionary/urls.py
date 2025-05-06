@@ -25,7 +25,7 @@ urlpatterns = [
     path('list', DictionaryEntryListView.as_view(), name='dictionary-entry-list'),
     path('detail', DictionaryEntryDetailView.as_view(), name='dictionary-entry-detail'),
     path('update', DictionaryUpdateView.as_view(), name='dictionary-update'),
-    path('delete', DictionaryDeleteView.as_view(), name='dictionary-delete'),
+    path('drop', DictionaryDeleteView.as_view(), name='dictionary-delete'),
 
     # Staging Entries Routes
     path('staging/list', StagingEntryListView.as_view(), name='staging-entry-list'),

@@ -21,7 +21,7 @@ from .models import MobileDevice, User, UserComment
 from .serializers import UserCommentSerializer, UserCommentSubmitSerializer, UserSerializer, PasswordValidator
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from .utils import log_activity
+from .utils import *
 from users import serializers
 
 from Crypto.Cipher import AES
@@ -32,112 +32,6 @@ import binascii
 User = get_user_model()
 
 logger = logging.getLogger(__name__)
-
-def format_date(date_obj):
-    """
-    Convert datetime object to 'DD-MM-YYYY' format
-    """
-    if not date_obj:
-        return None
-    return date_obj.strftime('%d-%m-%Y')
-
-def convert_to_khmer_number(text):
-    """
-    Convert Latin numbers to Khmer numbers
-    """
-    latin_to_khmer = {
-        '0': '០',
-        '1': '១',
-        '2': '២',
-        '3': '៣',
-        '4': '៤',
-        '5': '៥',
-        '6': '៦',
-        '7': '៧',
-        '8': '៨',
-        '9': '៩'
-    }
-
-    # If input is None or not a string, return as is
-    if not isinstance(text, str):
-        return text
-
-    # Convert each Latin digit to Khmer
-    return ''.join(latin_to_khmer.get(char, char) for char in text)
-
-def convert_to_khmer_date(date_str):
-    """
-    Convert Gregorian date to Khmer date format
-
-    Args:
-        date_str (str): Date in format 'DD-MM-YYYY'
-
-    Returns:
-        str: Date in Khmer format 'DD-Month-YYYY'
-    """
-    # Khmer month names
-    khmer_months = {
-        '01': 'មករា',
-        '02': 'កុម្ភៈ',
-        '03': 'មីនា',
-        '04': 'មេសា',
-        '05': 'ឧសភា',
-        '06': 'មិថុនា',
-        '07': 'កក្កដា',
-        '08': 'សីហា',
-        '09': 'កញ្ញា',
-        '10': 'តុលា',
-        '11': 'វិច្ឆិកា',
-        '12': 'ធ្នូ'
-    }
-
-    # Khmer number mapping
-    khmer_numbers = {
-        '0': '០', '1': '១', '2': '២', '3': '៣', '4': '៤',
-        '5': '៥', '6': '៦', '7': '៧', '8': '៨', '9': '៩'
-    }
-
-    def convert_to_khmer_number(num_str):
-        return ''.join(khmer_numbers.get(digit, digit) for digit in num_str)
-
-    try:
-        # Split the date
-        day, month, year = date_str.split('-')
-
-        # Convert to Khmer
-        khmer_day = convert_to_khmer_number(day)
-        khmer_month = khmer_months.get(month, month)
-        khmer_year = convert_to_khmer_number(year)
-
-        return f"{khmer_day}-{khmer_month}-{khmer_year}"
-
-    except Exception as e:
-        # If conversion fails, return original string
-        return date_str
-
-def format_phone_number(phone_number):
-    """
-    Format phone number by splitting into groups of 3 digits
-    """
-    # Remove any existing spaces or non-digit characters
-    cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
-
-    # Handle different phone number lengths
-    if len(cleaned_number) < 9:
-        return cleaned_number  # Return original if too short
-
-    # Different formatting based on number length
-    if len(cleaned_number) == 9:
-        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
-    elif len(cleaned_number) == 10:
-        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
-    else:
-        return ' '.join([
-            cleaned_number[:3],  # First 3 digits
-            cleaned_number[3:6],  # Next 3 digits
-            cleaned_number[6:]    # Remaining digits
-        ])
-
 
 class UserLoginView(APIView):
     permission_classes = [AllowAny]
@@ -332,12 +226,14 @@ class UserListView(APIView):
             role = request.query_params.get('role')
             is_active = request.query_params.get('is_active')
 
-            # Base queryset with soft delete filter and exclude specific email
-            users = User.objects.filter(
-                is_deleted=False
-            ).exclude(
-                email='fmis369@fmis.gov.kh'
-            )
+            # Base queryset with soft delete filter
+            users = User.objects.filter(is_deleted=False)
+
+            # If user is ADMIN, exclude specific emails
+            if request.user.role == 'ADMIN':
+                users = users.exclude(
+                    email__in=['fmis369.dic@fmis.gov.kh', 'admin@fmis.gov.kh']
+                )
 
             # Apply additional filters if provided
             if role:
@@ -669,10 +565,10 @@ class UserDropView(APIView):
             elif email:
                 user_query['email'] = email
 
-            target_user = User.objects.get(id=user_id)
-
             # Get the user model
             User = get_user_model()
+
+            target_user = User.objects.get(id=user_id)
 
             # Try to get the user, including those that might be soft-deleted
             # This is important - we need to check the base queryset, not the filtered one
@@ -1142,15 +1038,8 @@ class UserCommentView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @swagger_auto_schema(
-        operation_description="Get user comments",
+        operation_description="Get user comments (Admin/Superuser only)",
         manual_parameters=[
-            openapi.Parameter(
-                'X-Device-ID',
-                openapi.IN_HEADER,
-                type=openapi.TYPE_STRING,
-                description='Unique identifier for the mobile device',
-                required=True
-            ),
             openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=1),
             openapi.Parameter('per_page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=10),
             openapi.Parameter('is_reviewed', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN)
@@ -1175,7 +1064,7 @@ class UserCommentView(APIView):
     )
     def get(self, request):
         """
-        Get comments with pagination and filtering
+        Get comments with pagination and filtering (Admin/Superuser only)
         """
         # Check authentication
         if not request.user or not request.user.is_authenticated:
@@ -1185,17 +1074,13 @@ class UserCommentView(APIView):
                 'data': None
             }, status=status.HTTP_401_UNAUTHORIZED)
 
-        # Get device_id from header
-        device_id = request.headers.get('X-Device-ID')
-        if not device_id:
+        # Check authorization - only ADMIN and SUPERUSER can access
+        if request.user.role not in ['ADMIN', 'SUPERUSER']:
             return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'X-Device-ID header is required',
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'Access denied. Requires admin privileges.',
                 'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check authorization for viewing all comments
-        is_admin = request.user.role in ['ADMIN', 'SUPERUSER']
+            }, status=status.HTTP_403_FORBIDDEN)
 
         try:
             # Pagination parameters
@@ -1203,13 +1088,8 @@ class UserCommentView(APIView):
             per_page = int(request.query_params.get('per_page', 10))
             is_reviewed = request.query_params.get('is_reviewed')
 
-            # Base queryset
-            if is_admin:
-                # Admins can see all comments
-                comments = UserComment.objects.all()
-            else:
-                # Regular users can only see their own comments
-                comments = UserComment.objects.filter(user=request.user)
+            # Base queryset - all comments for admin/superuser
+            comments = UserComment.objects.select_related('user').all().order_by('-created_at')
 
             # Apply filters
             if is_reviewed is not None:
@@ -1232,7 +1112,7 @@ class UserCommentView(APIView):
                 'data': {
                     'comments': serializer.data
                 },
-                'total_comments': total_comments,
+                'total_entries': total_comments,
                 'page': page,
                 'per_page': per_page,
                 'total_pages': (total_comments + per_page - 1) // per_page

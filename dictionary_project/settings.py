@@ -197,7 +197,7 @@ MOBILE_JWT_SETTINGS = {
 }
 
 # Expire time for inactive token
-TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', 90)))
+TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', '180').split('#')[0].strip())),
 
 # Swagger config
 SWAGGER_SETTINGS = {

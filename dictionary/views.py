@@ -1587,91 +1587,140 @@ class StagingEntryUpdateView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Update a staging entry",
-        manual_parameters=[
-            openapi.Parameter(
-                'id',
-                openapi.IN_QUERY,
-                description="ID of the staging entry to update",
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        request_body=StagingEntryCreateSerializer,
+        operation_description="Update Staging Entry",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'word_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_en': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_kh_type': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_en_type': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_kh_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                'word_en_definition': openapi.Schema(type=openapi.TYPE_STRING),
+                'pronunciation_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'pronunciation_en': openapi.Schema(type=openapi.TYPE_STRING),
+                'example_sentence_kh': openapi.Schema(type=openapi.TYPE_STRING),
+                'example_sentence_en': openapi.Schema(type=openapi.TYPE_STRING)
+            }
+        ),
         responses={
-            200: 'Successfully updated',
-            400: 'Validation error',
-            403: 'Forbidden',
-            404: 'Not found'
+            200: openapi.Response(
+                description='Staging Entry Updated Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                    }
+                )
+            ),
+            400: 'Validation Error',
+            403: 'Unauthorized'
         }
     )
     @debug_error
     def put(self, request):
-        # Get the entry ID from query parameters
-        entry_id = request.query_params.get('id')
-
-        if not entry_id:
-            return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'Entry ID is required',
-                'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            # Retrieve the staging entry
-            staging_entry = Staging.objects.get(id=entry_id)
+            # Get the staging entry ID from query parameters
+            staging_id = request.query_params.get('id')
 
-            # Check permissions
-            # SUPERUSER can update any entry
-            # ADMIN can only update their own entries
-            # Regular users can only update their own entries
-            if request.user.role == 'SUPERUSER':
-                # SUPERUSER can update any entry
-                pass
-            elif staging_entry.created_by != request.user:
-                # Others can only update their own entries
+            # Validate staging ID
+            if not staging_id:
                 return Response({
-                    'responseCode': status.HTTP_403_FORBIDDEN,
-                    'message': 'You are not authorized to update this entry',
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Staging entry ID is required',
                     'data': None
-                }, status=status.HTTP_403_FORBIDDEN)
+                }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Validate and update
-            serializer = StagingEntryCreateSerializer(
+            # Retrieve the staging entry
+            try:
+                staging_entry = Staging.objects.get(id=staging_id)
+            except Staging.DoesNotExist:
+                return Response({
+                    'responseCode': status.HTTP_404_NOT_FOUND,
+                    'message': 'Staging entry not found',
+                    'data': None
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Prepare update data
+            update_data = {}
+            changed_fields = []
+
+            # Fields to check for updates
+            fields_to_check = [
+                'word_kh', 'word_en',
+                'word_kh_type', 'word_en_type',
+                'word_kh_definition', 'word_en_definition',
+                'pronunciation_kh', 'pronunciation_en',
+                'example_sentence_kh', 'example_sentence_en'
+            ]
+
+            # Check each field for changes
+            for field in fields_to_check:
+                if field in request.data:
+                    current_value = getattr(staging_entry, field, None)
+                    new_value = request.data[field]
+
+                    # Compare values, handling potential None/empty string cases
+                    if (str(current_value or '') != str(new_value or '')):
+                        update_data[field] = new_value
+                        changed_fields.append(field)
+
+            # Check if any changes were detected
+            if not update_data:
+                return Response({
+                    'responseCode': status.HTTP_200_OK,
+                    'message': 'No changes detected',
+                    'data': None
+                }, status=status.HTTP_200_OK)
+
+            # Validate the update
+            serializer = StagingEntrySerializer(
                 staging_entry,
-                data=request.data,
-                partial=True
+                data=update_data,
+                partial=True,
+                context={'request': request}
             )
 
             if serializer.is_valid():
-                serializer.save()
+                # Save the updated entry
+                updated_entry = serializer.save()
 
                 # Log the activity
                 log_activity(
                     admin_user=request.user,
                     action='STAGING_UPDATE',
-                    word_kh=serializer.data.get('word_kh'),
-                    word_en=serializer.data.get('word_en')
+                    word_kh=updated_entry.word_kh,
+                    word_en=updated_entry.word_en,
+                    # action_details={
+                    #     'changed_fields': changed_fields,
+                    #     'staging_entry_id': updated_entry.id
+                    # }
                 )
 
                 return Response({
                     'responseCode': status.HTTP_200_OK,
                     'message': 'Staging entry updated successfully',
-                    'data': serializer.data
-                })
+                    'data': {
+                        'changed_fields': changed_fields,
+                        'updated_entry': StagingEntrySerializer(updated_entry).data
+                    }
+                }, status=status.HTTP_200_OK)
 
+            # Handle validation errors
             return Response({
                 'responseCode': status.HTTP_400_BAD_REQUEST,
                 'message': 'Validation error',
-                'errors': serializer.errors
+                'data': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        except Staging.DoesNotExist:
+        except Exception as e:
             return Response({
-                'responseCode': status.HTTP_404_NOT_FOUND,
-                'message': 'Staging entry not found',
-                'data': None
-            }, status=status.HTTP_404_NOT_FOUND)
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Update failed',
+                'data': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class StagingEntryDeleteView(APIView):
     permission_classes = [IsAuthenticated]

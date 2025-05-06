@@ -79,3 +79,108 @@ def get_mobile_encryption_key():
         dynamic_key = dynamic_key[:32]
 
     return dynamic_key
+
+def format_date(date_obj):
+    """
+    Convert datetime object to 'DD-MM-YYYY' format
+    """
+    if not date_obj:
+        return None
+    return date_obj.strftime('%d-%m-%Y')
+
+def convert_to_khmer_number(text):
+    """
+    Convert Latin numbers to Khmer numbers
+    """
+    latin_to_khmer = {
+        '0': '០',
+        '1': '១',
+        '2': '២',
+        '3': '៣',
+        '4': '៤',
+        '5': '៥',
+        '6': '៦',
+        '7': '៧',
+        '8': '៨',
+        '9': '៩'
+    }
+
+    # If input is None or not a string, return as is
+    if not isinstance(text, str):
+        return text
+
+    # Convert each Latin digit to Khmer
+    return ''.join(latin_to_khmer.get(char, char) for char in text)
+
+def convert_to_khmer_date(date_str):
+    """
+    Convert Gregorian date to Khmer date format
+
+    Args:
+        date_str (str): Date in format 'DD-MM-YYYY'
+
+    Returns:
+        str: Date in Khmer format 'DD-Month-YYYY'
+    """
+    # Khmer month names
+    khmer_months = {
+        '01': 'មករា',
+        '02': 'កុម្ភៈ',
+        '03': 'មីនា',
+        '04': 'មេសា',
+        '05': 'ឧសភា',
+        '06': 'មិថុនា',
+        '07': 'កក្កដា',
+        '08': 'សីហា',
+        '09': 'កញ្ញា',
+        '10': 'តុលា',
+        '11': 'វិច្ឆិកា',
+        '12': 'ធ្នូ'
+    }
+
+    # Khmer number mapping
+    khmer_numbers = {
+        '0': '០', '1': '១', '2': '២', '3': '៣', '4': '៤',
+        '5': '៥', '6': '៦', '7': '៧', '8': '៨', '9': '៩'
+    }
+
+    def convert_to_khmer_number(num_str):
+        return ''.join(khmer_numbers.get(digit, digit) for digit in num_str)
+
+    try:
+        # Split the date
+        day, month, year = date_str.split('-')
+
+        # Convert to Khmer
+        khmer_day = convert_to_khmer_number(day)
+        khmer_month = khmer_months.get(month, month)
+        khmer_year = convert_to_khmer_number(year)
+
+        return f"{khmer_day}-{khmer_month}-{khmer_year}"
+
+    except Exception as e:
+        # If conversion fails, return original string
+        return date_str
+
+def format_phone_number(phone_number):
+    """
+    Format phone number by splitting into groups of 3 digits
+    """
+    # Remove any existing spaces or non-digit characters
+    cleaned_number = ''.join(filter(str.isdigit, str(phone_number)))
+
+    # Handle different phone number lengths
+    if len(cleaned_number) < 9:
+        return cleaned_number  # Return original if too short
+
+    # Different formatting based on number length
+    if len(cleaned_number) == 9:
+        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
+    elif len(cleaned_number) == 10:
+        return f"{cleaned_number[:3]} {cleaned_number[3:6]} {cleaned_number[6:]}"
+    else:
+        return ' '.join([
+            cleaned_number[:3],  # First 3 digits
+            cleaned_number[3:6],  # Next 3 digits
+            cleaned_number[6:]    # Remaining digits
+        ])

@@ -5,7 +5,7 @@ from django.db.models import Q
 
 from users.models import User
 from .models import RelatedWord, Staging, Dictionary, WordType, Bookmark
-from users.views import convert_to_khmer_date
+from users.utils import convert_to_khmer_date
 
 class StagingDictionaryEntrySerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
