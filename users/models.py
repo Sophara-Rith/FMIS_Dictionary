@@ -53,17 +53,29 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    # def create_superuser(self, username, email, password=None, **extra_fields):
-    #     extra_fields.setdefault('role', 'SUPERUSER')
-    #     extra_fields.setdefault('is_staff', True)
-    #     extra_fields.setdefault('is_superuser', True)
+    def create_superuser(self, username, email, password=None, **extra_fields):
+        # Set default values for superuser
+        extra_fields.setdefault('role', 'SUPERUSER')
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('is_active', True)
 
-    #     if extra_fields.get('is_staff') is not True:
-    #         raise ValueError('Superuser must have is_staff=True.')
-    #     if extra_fields.get('is_superuser') is not True:
-    #         raise ValueError('Superuser must have is_superuser=True.')
+        # Validate superuser attributes
+        if extra_fields.get('role') != 'SUPERUSER':
+            raise ValueError('Superuser must have role=SUPERUSER')
 
-    #     return self.create_user(username, email, password, **extra_fields)
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Superuser must have is_staff=True')
+
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Superuser must have is_superuser=True')
+
+        # Use create_user method to create the superuser
+        return self.create_user(username, email, password, **extra_fields)
+
+    def get_queryset(self):
+        # Override default queryset to exclude soft-deleted users
+        return super().get_queryset().filter(is_deleted=False)
 
 class User(AbstractBaseUser):
     ROLE_CHOICES = (
@@ -101,7 +113,7 @@ class User(AbstractBaseUser):
 
     is_suspended = models.BooleanField(default=False)
     last_login_attempt = models.DateTimeField(null=True, blank=True)
-    login_attempts = models.IntegerField(default=0)
+    login_attempt = models.IntegerField(default=0)
     suspended_at = models.DateTimeField(null=True, blank=True)
     suspension_reason = models.TextField(null=True, blank=True)
 
@@ -130,11 +142,6 @@ class User(AbstractBaseUser):
 
     def has_module_perms(self, app_label):
         return self.is_superuser
-
-class UserManager(BaseUserManager):
-    def get_queryset(self):
-        # Override default queryset to exclude soft-deleted users
-        return super().get_queryset().filter(is_deleted=False)
 
 class MobileDevice(models.Model):
     user = models.ForeignKey(

@@ -183,21 +183,22 @@ CACHES = {
 
 # Use for general purpose exclude mobile version
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(90)),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('REFRESH_TOKEN_LIFETIME', 1))),
-    'ROTATE_REFRESH_TOKENS': True,
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('ACCESS_TOKEN_LIFETIME', 60))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('REFRESH_TOKEN_LIFETIME', 1440))),
     'BLACKLIST_AFTER_ROTATION': True,
+    'ROTATE_REFRESH_TOKENS': True,
+    'UPDATE_LAST_LOGIN': True,
 }
 # exclusively use only for mobile version processing
 MOBILE_JWT_SETTINGS = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=int(os.getenv('MOBILE_ACCESS_TOKEN_LIFETIME', 3))),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('MOBILE_REFRESH_TOKEN_LIFETIME', 3))),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('MOBILE_ACCESS_TOKEN_LIFETIME', 4320))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('MOBILE_REFRESH_TOKEN_LIFETIME', 4320))),
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': False,
 }
 
 # Expire time for inactive token
-TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', '180').split('#')[0].strip())),
+TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', '90'))),
 
 # Swagger config
 SWAGGER_SETTINGS = {
@@ -287,8 +288,9 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
 
 # Celery Config
-CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+# Use local Redis broker for offline mode
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'

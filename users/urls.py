@@ -10,7 +10,9 @@ from .views import (
     UserListView,
     UserDetailView,
     MobileLoginView,
-    UserCommentView
+    UserCommentView,
+    UserSuspendView,
+    UserUnsuspendView
 )
 #####################
 urlpatterns = [
@@ -21,6 +23,8 @@ urlpatterns = [
     path('update', UserUpdateView.as_view(), name='user-update'),
     path('list', UserListView.as_view(), name='user-list'),
     path('detail', UserDetailView.as_view(), name='user-detail'),
+    path('suspend/', UserSuspendView.as_view(), name='user-suspend'),
+    path('unsuspend/', UserUnsuspendView.as_view(), name='user-unsuspend'),
 
     path('mobile/login/', MobileLoginView.as_view(), name='mobile_login'),
     path('comment/', UserCommentView.as_view(), name='user-comment'),

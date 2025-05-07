@@ -2,9 +2,10 @@
 from datetime import datetime, timedelta
 import logging
 import traceback
+import base64
+import binascii
 from venv import logger
 from zoneinfo import ZoneInfo
-from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -15,19 +16,18 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.db.models import F, Q
+from django.conf import settings
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 
 from debug_utils import debug_error
 from .models import MobileDevice, User, UserComment
 from .serializers import UserCommentSerializer, UserCommentSubmitSerializer, UserSerializer, PasswordValidator
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
 from .utils import *
 from users import serializers
-
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
-import base64
-import binascii
 
 User = get_user_model()
 
@@ -107,8 +107,23 @@ class UserLoginView(APIView):
             else:
                 user = User.objects.filter(username=login_input).first()
 
+            if user and user.is_suspended:
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'Your account has been suspended',
+                    'data': {
+                        'suspended_at': user.suspended_at,
+                        'reason': user.suspension_reason
+                    }
+                }, status=status.HTTP_403_FORBIDDEN)
+
             # Validate user and password
             if user and user.check_password(password):
+                user.last_login = timezone.now()
+                user.last_login_attempt = timezone.now()
+                user.login_attempt = F('login_attempt') + 1  # Increment login attempts
+                user.save(update_fields=['last_login', 'last_login_attempt', 'login_attempt'])
+
                 # Generate tokens
                 refresh = RefreshToken.for_user(user)
 
@@ -232,7 +247,7 @@ class UserListView(APIView):
             # If user is ADMIN, exclude specific emails
             if request.user.role == 'ADMIN':
                 users = users.exclude(
-                    email__in=['fmis369.dic@fmis.gov.kh', 'admin@fmis.gov.kh']
+                    Q(email='fmis369.dic@fmis.gov.kh') | Q(role='SUPERUSER')
                 )
 
             # Apply additional filters if provided
@@ -246,6 +261,7 @@ class UserListView(APIView):
             user_data = [{
                 'id': user.id,
                 'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
+                'username': user.username or '',
                 'username_kh': user.username_kh or '',
                 'sex': user.sex or '',
                 'position': user.position or '',
@@ -349,6 +365,7 @@ class UserDetailView(APIView):
             user_data = {
                 'id': user.id,
                 'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
+                'username': user.username or '',
                 'username_kh': user.username_kh or '',
                 'sex': user.sex or '',
                 'position': user.position or '',
@@ -1125,6 +1142,112 @@ class UserCommentView(APIView):
                 'data': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class UserSuspendView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Suspend User Account",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['user_id', 'reason'],
+            properties={
+                'user_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'reason': openapi.Schema(type=openapi.TYPE_STRING)
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description='User Suspended Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'suspended_user': openapi.Schema(type=openapi.TYPE_OBJECT)
+                    }
+                )
+            ),
+            403: 'Forbidden - Insufficient Permissions'
+        }
+    )
+    @debug_error
+    def post(self, request):
+        # Ensure only ADMIN or SUPERUSER can suspend users
+        if request.user.role not in ['ADMIN', 'SUPERUSER']:
+            return Response({
+                'error': 'You do not have permission to suspend users'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        user_id = request.data.get('user_id')
+        reason = request.data.get('reason', 'No reason provided')
+
+        try:
+            user = User.objects.get(id=user_id)
+
+            # Prevent suspending yourself or other admins
+            if user.id == request.user.id or user.role in ['ADMIN', 'SUPERUSER']:
+                return Response({
+                    'error': 'Cannot suspend this user'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Suspend the user
+            user.is_suspended = True
+            user.suspended_at = timezone.now()
+            user.suspension_reason = reason
+            user.save(update_fields=['is_suspended', 'suspended_at', 'suspension_reason'])
+
+            return Response({
+                'message': 'User suspended successfully',
+                'suspended_user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'suspended_at': user.suspended_at,
+                    'suspension_reason': user.suspension_reason
+                }
+            }, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            return Response({
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+class UserUnsuspendView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @debug_error
+    def post(self, request):
+        # Similar structure to suspend, but reverses suspension
+        if request.user.role not in ['ADMIN', 'SUPERUSER']:
+            return Response({
+                'error': 'You do not have permission to unsuspend users'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        user_id = request.data.get('user_id')
+
+        try:
+            user = User.objects.get(id=user_id)
+
+            # Unsuspend the user
+            user.is_suspended = False
+            user.suspended_at = None
+            user.suspension_reason = None
+            user.save(update_fields=['is_suspended', 'suspended_at', 'suspension_reason'])
+
+            return Response({
+                'message': 'User unsuspended successfully',
+                'unsuspended_user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email
+                }
+            }, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            return Response({
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+
 class CustomTokenObtainPairView(TokenObtainPairView):
     @swagger_auto_schema(
         operation_description="Obtain JWT Tokens with Flexible Login",
@@ -1328,17 +1451,27 @@ class CustomTokenRefreshView(TokenRefreshView):
             # Call parent method to get new tokens
             response = super().post(request, *args, **kwargs)
 
-            # Create a new response with the desired structure
+            # Log the raw response data for debugging
+            logger.info(f"Raw Token Refresh Response: {response.data}")
+
+            # Ensure both tokens are present
+            refresh_token = response.data.get('refresh')
+            access_token = response.data.get('access')
+
+            if not refresh_token:
+                logger.warning("Refresh token is missing during token refresh")
+
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Token refreshed successfully',
                 'data': {
-                    'refresh': response.data.get('refresh'),
-                    'access': response.data.get('access')
+                    'refresh': refresh_token,  # This might be None
+                    'access': access_token
                 }
             })
+
         except Exception as e:
-            # Log the exception for debugging
+            # Log the exception for comprehensive debugging
             logger.error(f"Token refresh error: {str(e)}")
 
             return Response({

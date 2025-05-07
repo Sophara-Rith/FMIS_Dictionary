@@ -80,6 +80,7 @@ def get_mobile_encryption_key():
 
     return dynamic_key
 
+
 def format_date(date_obj):
     """
     Convert datetime object to 'DD-MM-YYYY' format

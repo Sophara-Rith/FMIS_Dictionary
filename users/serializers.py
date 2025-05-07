@@ -215,6 +215,8 @@ class UserSerializer(serializers.ModelSerializer):
         username = email.split('@')[0] if email else ''
         validated_data['username'] = username
 
+        validated_data['is_staff'] = validated_data.get('role') in ['USER', 'ADMIN', 'SUPERUSER']
+
         # Generate staff ID automatically
         staff_id = StaffIDGenerator.generate_next_staff_id()
         validated_data['staff_id'] = staff_id
