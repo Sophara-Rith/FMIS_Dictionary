@@ -196,7 +196,8 @@ class UserListView(APIView):
                                             'email': openapi.Schema(type=openapi.TYPE_STRING),
                                             'phone_number': openapi.Schema(type=openapi.TYPE_STRING),
                                             'date_joined': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
-                                            'role': openapi.Schema(type=openapi.TYPE_STRING)
+                                            'role': openapi.Schema(type=openapi.TYPE_STRING),
+                                            'is_suspended': openapi.Schema(type=openapi.TYPE_INTEGER, description='0: Not Suspended, 1: Suspended')
                                         }
                                     )
                                 )
@@ -240,15 +241,14 @@ class UserListView(APIView):
             # Optional filtering parameters
             role = request.query_params.get('role')
             is_active = request.query_params.get('is_active')
+            is_suspended = request.query_params.get('is_suspended')
 
-            # Base queryset with soft delete filter
+            # Base queryset with soft delete filter and exclude specific email
             users = User.objects.filter(is_deleted=False)
 
-            # If user is ADMIN, exclude specific emails
             if request.user.role == 'ADMIN':
-                users = users.exclude(
-                    Q(email='fmis369.dic@fmis.gov.kh') | Q(role='SUPERUSER')
-                )
+                # ADMIN users cannot see SUPERUSER accounts or the specific email
+                users = users.exclude(role='SUPERUSER').exclude(role='MOBILE')
 
             # Apply additional filters if provided
             if role:
@@ -261,14 +261,16 @@ class UserListView(APIView):
             user_data = [{
                 'id': user.id,
                 'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
-                'username': user.username or '',
                 'username_kh': user.username_kh or '',
                 'sex': user.sex or '',
                 'position': user.position or '',
                 'email': user.email,
                 'phone_number': convert_to_khmer_number(user.phone_number) if user.phone_number else '',
                 'date_joined': convert_to_khmer_date(user.date_joined.strftime('%d-%m-%Y')) if user.date_joined else '',
-                'role': user.role
+                'role': user.role,
+                'is_suspended': 1 if user.is_suspended else 0,
+                'suspended_reason': user.suspension_reason,
+                'suspended_at': user.suspended_at
             } for user in users]
 
             return Response({
@@ -372,7 +374,10 @@ class UserDetailView(APIView):
                 'email': user.email,
                 'phone_number': convert_to_khmer_number(user.phone_number) if user.phone_number else '',
                 'date_joined': convert_to_khmer_date(user.date_joined.strftime('%d-%m-%Y')) if user.date_joined else '',
-                'role': user.role
+                'role': user.role,
+                'is_suspended': 1 if user.is_suspended else 0,
+                'suspended_reason': user.suspension_reason,
+                'suspended_at': user.suspended_at
             }
 
             return Response({
@@ -1146,13 +1151,24 @@ class UserSuspendView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Suspend User Account",
+        operation_description="Suspend a User Account",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the user to be suspended",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['user_id', 'reason'],
+            required=['reason'],
             properties={
-                'user_id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                'reason': openapi.Schema(type=openapi.TYPE_STRING)
+                'reason': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Reason for suspending the user account"
+                )
             }
         ),
         responses={
@@ -1161,91 +1177,271 @@ class UserSuspendView(APIView):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
                         'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'suspended_user': openapi.Schema(type=openapi.TYPE_OBJECT)
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                'suspended_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
+                                'suspended_reason': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        )
                     }
                 )
             ),
-            403: 'Forbidden - Insufficient Permissions'
+            400: openapi.Response(
+                description='Bad Request - Validation Error',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            ),
+            403: openapi.Response(
+                description='Forbidden - Insufficient Permissions',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            )
         }
     )
     @debug_error
     def post(self, request):
-        # Ensure only ADMIN or SUPERUSER can suspend users
+        # Check user permissions
         if request.user.role not in ['ADMIN', 'SUPERUSER']:
             return Response({
-                'error': 'You do not have permission to suspend users'
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'You do not have permission to suspend users',
+                'data': None
             }, status=status.HTTP_403_FORBIDDEN)
 
-        user_id = request.data.get('user_id')
-        reason = request.data.get('reason', 'No reason provided')
+        # Get user ID from query parameter
+        user_id = request.query_params.get('id')
+        if not user_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'User ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate reason
+        reason = request.data.get('reason')
+        if not reason:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'Suspension reason is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            # Find the user
             user = User.objects.get(id=user_id)
 
-            # Prevent suspending yourself or other admins
-            if user.id == request.user.id or user.role in ['ADMIN', 'SUPERUSER']:
+            # Check if user is already suspended
+            if user.is_suspended:
                 return Response({
-                    'error': 'Cannot suspend this user'
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'User is already suspended',
+                    'data': None
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             # Suspend the user
             user.is_suspended = True
             user.suspended_at = timezone.now()
             user.suspension_reason = reason
-            user.save(update_fields=['is_suspended', 'suspended_at', 'suspension_reason'])
+            user.suspended_by = request.user
+            user.save(update_fields=['is_suspended', 'suspended_at', 'suspension_reason', 'suspended_by'])
+
+            # Log the suspension activity
+            log_activity(
+                admin_user=request.user,
+                action='USER_SUSPENDED',
+                target_user=user,
+                details=f"Reason: {reason}"
+            )
 
             return Response({
+                'responseCode': status.HTTP_200_OK,
                 'message': 'User suspended successfully',
-                'suspended_user': {
+                'data': {
                     'id': user.id,
                     'username': user.username,
                     'email': user.email,
-                    'suspended_at': user.suspended_at,
-                    'suspension_reason': user.suspension_reason
+                    'suspended_at': user.suspended_at.isoformat(),
+                    'suspended_reason': user.suspension_reason
                 }
             }, status=status.HTTP_200_OK)
 
         except User.DoesNotExist:
             return Response({
-                'error': 'User not found'
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'User not found',
+                'data': None
             }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': f'An error occurred: {str(e)}',
+                'data': None
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserUnsuspendView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_description="Unsuspend a User Account",
+        manual_parameters=[
+            openapi.Parameter(
+                'id',
+                openapi.IN_QUERY,
+                description="ID of the user to be unsuspended",
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'reason': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Optional reason for unsuspending the user account"
+                )
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description='User Unsuspended Successfully',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                'unsuspended_at': openapi.Schema(type=openapi.TYPE_STRING, format='date-time')
+                            }
+                        )
+                    }
+                )
+            ),
+            400: openapi.Response(
+                description='Bad Request - Validation Error',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            ),
+            403: openapi.Response(
+                description='Forbidden - Insufficient Permissions',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                    }
+                )
+            )
+        }
+    )
     @debug_error
     def post(self, request):
-        # Similar structure to suspend, but reverses suspension
+        # Check user permissions
         if request.user.role not in ['ADMIN', 'SUPERUSER']:
             return Response({
-                'error': 'You do not have permission to unsuspend users'
+                'responseCode': status.HTTP_403_FORBIDDEN,
+                'message': 'You do not have permission to unsuspend users',
+                'data': None
             }, status=status.HTTP_403_FORBIDDEN)
 
-        user_id = request.data.get('user_id')
+        # Get user ID from query parameter
+        user_id = request.query_params.get('id')
+        if not user_id:
+            return Response({
+                'responseCode': status.HTTP_400_BAD_REQUEST,
+                'message': 'User ID is required',
+                'data': None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Optional reason for unsuspension
+        reason = request.data.get('reason', 'Administrative action')
 
         try:
+            # Find the user
             user = User.objects.get(id=user_id)
+
+            # Check if user is already active
+            if not user.is_suspended:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'User is not currently suspended',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             # Unsuspend the user
             user.is_suspended = False
             user.suspended_at = None
             user.suspension_reason = None
-            user.save(update_fields=['is_suspended', 'suspended_at', 'suspension_reason'])
+            user.unsuspended_by = request.user
+            user.unsuspended_at = timezone.now()
+            user.save(update_fields=[
+                'is_suspended',
+                'suspended_at',
+                'suspension_reason',
+                'unsuspended_by',
+                'unsuspended_at'
+            ])
+
+            # Log the unsuspension activity
+            log_activity(
+                admin_user=request.user,
+                action='USER_UNSUSPENDED',
+                target_user=user,
+                details=f"Reason: {reason}"
+            )
 
             return Response({
+                'responseCode': status.HTTP_200_OK,
                 'message': 'User unsuspended successfully',
-                'unsuspended_user': {
+                'data': {
                     'id': user.id,
                     'username': user.username,
-                    'email': user.email
+                    'email': user.email,
+                    'unsuspended_at': user.unsuspended_at.isoformat()
                 }
             }, status=status.HTTP_200_OK)
 
         except User.DoesNotExist:
             return Response({
-                'error': 'User not found'
+                'responseCode': status.HTTP_404_NOT_FOUND,
+                'message': 'User not found',
+                'data': None
             }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': f'An error occurred: {str(e)}',
+                'data': None
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):

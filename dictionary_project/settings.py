@@ -1,4 +1,5 @@
 # dictionary_project/settings.py
+# -------------
 import os
 from pathlib import Path
 from datetime import timedelta
@@ -198,7 +199,7 @@ MOBILE_JWT_SETTINGS = {
 }
 
 # Expire time for inactive token
-TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', '90'))),
+TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', 30))),
 
 # Swagger config
 SWAGGER_SETTINGS = {

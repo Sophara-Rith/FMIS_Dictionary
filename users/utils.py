@@ -1,3 +1,4 @@
+# users/utils.py
 from venv import logger
 from .models import ActivityLog
 from datetime import datetime

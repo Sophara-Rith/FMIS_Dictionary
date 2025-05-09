@@ -38,7 +38,7 @@ from .serializers import (
 )
 from debug_utils import debug_error
 from .tasks import process_staging_bulk_import_sync
-from .utils import DictionaryTemplateGenerator
+from .utils import DictionaryTemplateGenerator, convert_to_khmer_date
 from users.utils import log_activity
 from dictionary import models
 
@@ -827,67 +827,41 @@ def generate_next_index():
         return Dictionary.objects.count() + 1
 
 class StagingEntryListView(APIView):
-    permission_classes = [IsAuthenticated] #change from IsAdminUser
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="List staging entries with user-specific filtering",
+        operation_description="List Staging Entries with Pagination",
         manual_parameters=[
             openapi.Parameter(
-                'user_id',
+                'id',
                 openapi.IN_QUERY,
-                description="Filter staging entries by user ID",
-                type=openapi.TYPE_INTEGER
+                description="User ID to filter entries",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Entries per page",
+                type=openapi.TYPE_INTEGER,
+                default=30000
             ),
             openapi.Parameter(
                 'review_status',
                 openapi.IN_QUERY,
                 description="Filter by review status",
                 type=openapi.TYPE_STRING,
-                enum=['PENDING', 'APPROVED', 'REJECTED']
-            ),
-            openapi.Parameter(
-                'page',
-                openapi.IN_QUERY,
-                description="Page number for pagination",
-                type=openapi.TYPE_INTEGER
-            ),
-            openapi.Parameter(
-                'per_page',
-                openapi.IN_QUERY,
-                description="Number of items per page",
-                type=openapi.TYPE_INTEGER
+                required=False
             )
-        ],
-        responses={
-            200: openapi.Response(
-                description='Successful retrieval of staging entries',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'entries': openapi.Schema(
-                                    type=openapi.TYPE_ARRAY,
-                                    items=openapi.Schema(
-                                        type=openapi.TYPE_OBJECT
-                                    )
-                                ),
-                                'total_entries': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'page': openapi.Schema(type=openapi.TYPE_INTEGER),
-                                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
-                            }
-                        )
-                    }
-                )
-            ),
-            400: 'Bad Request',
-            403: 'Forbidden'
-        }
+        ]
     )
-    @debug_error
     def get(self, request):
         # Get query parameters
         user_id = request.query_params.get('id')
@@ -1246,24 +1220,22 @@ class StagingEntryApproveView(APIView):
         }
     )
     @debug_error
-    @debug_error
     def post(self, request):
-        # Get the entry ID from query parameters
-        entry_id = request.query_params.get('id')
-
-        if not entry_id:
-            return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'Entry ID is required',
-                'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
         try:
+            # Get the entry ID from query parameters
+            entry_id = request.query_params.get('id')
+
+            if not entry_id:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Entry ID is required',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Retrieve the staging entry
             staging_entry = Staging.objects.get(id=entry_id)
 
             # Check permissions
-            # Both ADMIN and SUPERUSER can approve entries
             if request.user.role not in ['ADMIN', 'SUPERUSER']:
                 return Response({
                     'responseCode': status.HTTP_403_FORBIDDEN,
@@ -1273,6 +1245,9 @@ class StagingEntryApproveView(APIView):
 
             # Create Dictionary entry
             dictionary_entry = self._create_dictionary_entry_from_staging(staging_entry, request.user)
+
+            # Process word relationships
+            self._process_word_relationships(dictionary_entry, staging_entry)
 
             # Update staging entry status
             staging_entry.review_status = 'APPROVED'
@@ -1291,7 +1266,11 @@ class StagingEntryApproveView(APIView):
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Staging entry approved successfully',
-                'data': None
+                'data': {
+                    'id': dictionary_entry.id,
+                    'word_kh': dictionary_entry.word_kh,
+                    'word_en': dictionary_entry.word_en
+                }
             })
 
         except Staging.DoesNotExist:
@@ -1300,6 +1279,90 @@ class StagingEntryApproveView(APIView):
                 'message': 'Staging entry not found',
                 'data': None
             }, status=status.HTTP_404_NOT_FOUND)
+
+    def _process_word_relationships(self, dictionary_entry, staging_entry):
+        """
+        Process word relationships for dictionary entries
+        """
+        # Split words for both Khmer and English
+        kh_words = staging_entry.word_kh.split()
+        en_words = staging_entry.word_en.split()
+
+        # Process English words relationships
+        if len(en_words) > 1:
+            # Find potential parent words
+            for word in en_words[:-1]:  # Exclude the last word
+                parent_word = Dictionary.objects.filter(
+                    word_en=word,
+                    is_parent=True
+                ).first()
+
+                if parent_word:
+                    # Create RelatedWord entry
+                    RelatedWord.objects.get_or_create(
+                        parent_word=parent_word,
+                        child_word=dictionary_entry,
+                        defaults={
+                            'relationship_type': 'COMPOUND'
+                        }
+                    )
+
+        # Process Khmer words relationships
+        if len(kh_words) > 1:
+            for word in kh_words[:-1]:  # Exclude the last word
+                parent_word = Dictionary.objects.filter(
+                    word_kh=word,
+                    is_parent=True
+                ).first()
+
+                if parent_word:
+                    # Create RelatedWord entry
+                    RelatedWord.objects.get_or_create(
+                        parent_word=parent_word,
+                        child_word=dictionary_entry,
+                        defaults={
+                            'relationship_type': 'COMPOUND'
+                        }
+                    )
+
+    def _create_dictionary_entry_from_staging(self, staging_entry, user):
+        """
+        Create a dictionary entry from a staging entry
+        """
+        # Generate unique index
+        max_index = Dictionary.objects.aggregate(Max('index'))['index__max'] or 0
+        new_index = max_index + 1
+
+        # Create new dictionary entry
+        new_word = Dictionary.objects.create(
+            word_kh=staging_entry.word_kh,
+            word_en=staging_entry.word_en,
+            word_kh_type=staging_entry.word_kh_type,
+            word_en_type=staging_entry.word_en_type,
+            word_kh_definition=staging_entry.word_kh_definition,
+            word_en_definition=staging_entry.word_en_definition,
+            pronunciation_kh=staging_entry.pronunciation_kh,
+            pronunciation_en=staging_entry.pronunciation_en,
+            example_sentence_kh=staging_entry.example_sentence_kh,
+            example_sentence_en=staging_entry.example_sentence_en,
+            created_by=user,
+            index=new_index
+        )
+
+        # Determine parent/child status
+        words = staging_entry.word_en.split()
+        full_phrase = staging_entry.word_en
+
+        if len(words) == 1:
+            new_word.is_parent = True
+            new_word.is_child = False
+        elif staging_entry.is_child:
+            new_word.is_parent = False
+            new_word.is_child = True
+
+        new_word.save()
+
+        return new_word
 
     def _create_dictionary_entry_from_staging(self, staging_entry, user):
         """
@@ -2747,7 +2810,7 @@ class DictionarySyncAllView(APIView):
 
             # Pagination parameters
             page = max(1, int(request.GET.get('page', 1)))
-            per_page = max(1, min(int(request.GET.get('per_page', 100)), 100))
+            per_page = max(1, min(int(request.GET.get('per_page', 100)), 80000))
 
             # Get all bookmarked word IDs for this device in one query
             bookmarked_ids = set(Bookmark.objects.filter(device_id=device_id)

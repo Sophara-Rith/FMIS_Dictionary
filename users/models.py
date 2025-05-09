@@ -53,7 +53,7 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, username, email, password=None, **extra_fields):
+    def create_superuser(self, email, password=None, **extra_fields):
         # Set default values for superuser
         extra_fields.setdefault('role', 'SUPERUSER')
         extra_fields.setdefault('is_staff', True)
@@ -71,7 +71,7 @@ class UserManager(BaseUserManager):
             raise ValueError('Superuser must have is_superuser=True')
 
         # Use create_user method to create the superuser
-        return self.create_user(username, email, password, **extra_fields)
+        return self.create_user(email, password, **extra_fields)
 
     def get_queryset(self):
         # Override default queryset to exclude soft-deleted users
@@ -81,7 +81,8 @@ class User(AbstractBaseUser):
     ROLE_CHOICES = (
         ('USER', 'Regular User'),
         ('ADMIN', 'Administrator'),
-        ('SUPERUSER', 'Super User')
+        ('SUPERUSER', 'Super User'),
+        ('MOBILE', 'Mobile user')
     )
 
     SEX_CHOICES = (
@@ -116,6 +117,21 @@ class User(AbstractBaseUser):
     login_attempt = models.IntegerField(default=0)
     suspended_at = models.DateTimeField(null=True, blank=True)
     suspension_reason = models.TextField(null=True, blank=True)
+    suspended_by = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='suspended_users'
+    )
+    unsuspended_by = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='unsuspended_users'
+    )
+    unsuspended_at = models.DateTimeField(null=True, blank=True)
 
     objects = UserManager()
 

@@ -1,3 +1,4 @@
+# dictionary/tasks.py
 import logging
 import pandas as pd
 from celery import shared_task

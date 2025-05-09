@@ -1,6 +1,7 @@
 dictionary/migrations/00*.py
 users/migrations/00*.py
-media/import_templates/dictionary_import_template_*.xlsx
+media/*.xlsx
+*.log
 
 approve.py
 error_debug.log

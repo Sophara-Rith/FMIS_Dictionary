@@ -168,8 +168,12 @@ class Staging(models.Model):
         unique_together = [['word_kh', 'word_en']]
         ordering = ['-created_at']
         indexes = [
+            models.Index(fields=['-id']),
             models.Index(fields=['is_parent']),
-            models.Index(fields=['is_child'])
+            models.Index(fields=['is_child']),
+            models.Index(fields=['created_by_id']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['review_status'])
         ]
 
     def set_action_details(self, data):
