@@ -2354,13 +2354,22 @@ class DictionaryTemplateDownloadView(APIView):
     @debug_error
     def get(self, request):
         """
-        Generate and provide downloadable Excel template
+        Generate and provide downloadable Excel template with a unique filename
         """
         try:
             # Get a temporary directory
             import tempfile
             import os
             import io
+            import uuid
+            from datetime import datetime
+
+            # Generate a unique filename with timestamp and/or UUID
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_id = str(uuid.uuid4())[:8]  # Use first 8 characters of UUID
+
+            # Create unique filename
+            unique_filename = f"dictionary_import_template_{unique_id}.xlsx"
 
             # Create a temporary directory
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -2368,24 +2377,19 @@ class DictionaryTemplateDownloadView(APIView):
                 template_path = DictionaryTemplateGenerator.generate_template(
                     output_dir=temp_dir
                 )
-
                 # Validate template file exists
                 if not os.path.exists(template_path):
                     raise FileNotFoundError(f"Template file not generated: {template_path}")
-
                 # Open the file and read its content
                 with open(template_path, 'rb') as template_file:
                     file_content = template_file.read()
-
-                # Return file response
+                # Return file response with unique filename
                 response = FileResponse(
                     io.BytesIO(file_content),
                     as_attachment=True,
-                    filename='dictionary_import_template.xlsx'
+                    filename=unique_filename
                 )
-
                 return response
-
         except Exception as e:
             # Log the full error details
             logger.error(f"Template Generation Error: {str(e)}", exc_info=True)

@@ -1909,7 +1909,7 @@ class MobileLoginView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # use OpenSSL-compatible AES-256 encryption
+            # OpenSSL-compatible AES-256 encryption in CBC mode
             # Decrypt the device_id if it's encrypted
             try:
                 # Check if device_id looks like base64 (potential encryption)
@@ -1968,26 +1968,34 @@ class MobileLoginView(APIView):
             from django.contrib.auth import get_user_model
             User = get_user_model()
 
-            # Check if the login input is the allowed mobile username or email
-            allowed_username = 'fmis369.dic'
-            allowed_email = 'fmis369.dic@fmis.gov.kh'
+            # Find user with MOBILE role
+            try:
+                mobile_user = User.objects.get(
+                    username=login_input,
+                    role='MOBILE'
+                )
 
-            # Find the mobile user
-            mobile_user = None
+                # Validate password
+                if not mobile_user.check_password(password):
+                    raise User.DoesNotExist
 
-            # Try to find user by username or email
-            if login_input == allowed_username:
-                mobile_user = User.objects.filter(username=allowed_username).first()
-            elif login_input == allowed_email:
-                mobile_user = User.objects.filter(email=allowed_email).first()
-
-            # If user not found or credentials don't match
-            if not mobile_user or not mobile_user.check_password(password):
+            except User.DoesNotExist:
                 return Response({
                     'responseCode': status.HTTP_401_UNAUTHORIZED,
                     'message': 'Invalid mobile credentials',
                     'data': None
                 }, status=status.HTTP_401_UNAUTHORIZED)
+
+            # Check if user is suspended
+            if hasattr(mobile_user, 'is_suspended') and mobile_user.is_suspended:
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'This mobile account has been suspended',
+                    'data': {
+                        'suspended_at': mobile_user.suspended_at,
+                        'reason': mobile_user.suspension_reason
+                    }
+                }, status=status.HTTP_403_FORBIDDEN)
 
             # Generate tokens with custom method for precise control
             access_token, refresh_token, token_expires_at = self.generate_mobile_tokens(mobile_user, device_id)

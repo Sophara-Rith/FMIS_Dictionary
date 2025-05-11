@@ -31,8 +31,6 @@ urlpatterns = [
     path('staging/list', StagingEntryListView.as_view(), name='staging-entry-list'),
     path('staging/create/', StagingEntryCreateView.as_view(), name='staging-entry-create'),
     path('staging/detail', StagingEntryDetailView.as_view(), name='staging-entry-detail'),
-
-    # Updated routes with explicit id parameter
     path('staging/update', StagingEntryUpdateView.as_view(), name='staging-entry-update'),
     path('staging/drop', StagingEntryDeleteView.as_view(), name='staging-entry-delete'),
     path('staging/approve', StagingEntryApproveView.as_view(), name='staging-entry-approve'),

@@ -12,18 +12,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('SECRET_KEY', 'ffbbd8a89bbcff640b94da2a61109edea4ad334af9cce6371d210c519b1f131ea338773828a8ed6c612d7625d0bae7d66cf6')
 
 # Mobile Sync Credentials
-MOBILE_DEFAULT_USERNAME = os.getenv('MOBILE_DEFAULT_USERNAME', 'fmis369')
+MOBILE_DEFAULT_USERNAME = os.getenv('MOBILE_DEFAULT_USERNAME')
 MOBILE_DEFAULT_PASSWORD = os.getenv('MOBILE_DEFAULT_PASSWORD')
 
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '172.18.48.1',
-    '172.23.23.48',
-    'tops-dolphin-able.ngrok-free.app'
-]
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS','').split(',')
 
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -121,6 +115,10 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD', ''),
         'HOST': os.getenv('DB_HOST', ''),
         'PORT': os.getenv('DB_PORT', ''),
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            'charset': 'utf8mb4',
+        }
     }
 }
 
@@ -153,16 +151,13 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
     'PAGE_SIZE': 100,
     'DEFAULT_THROTTLE_CLASSES': [
-        # 'rest_framework.throttling.AnonRateThrottle',
-        # 'rest_framework.throttling.UserRateThrottle'
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        # 'anon': os.getenv('ANON_RATE', '100/day'),
-        # 'user': os.getenv('USER_RATE', '1000/day'),
-        # 'search': os.getenv('SEARCH', '20/minute')
-        'anon': None,
-        'user': None,
-        'search': None
+        'anon': os.getenv('ANON_RATE', '500/hour'),
+        'user': os.getenv('USER_RATE', '700/hour'),
+        'search': os.getenv('SEARCH', '100/minute')
     }
 }
 
@@ -175,7 +170,7 @@ DICTIONARY_SEARCH_CONFIG = {
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1'),
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         }
@@ -199,7 +194,7 @@ MOBILE_JWT_SETTINGS = {
 }
 
 # Expire time for inactive token
-TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', 30))),
+TOKEN_EXPIRE_TIME = timedelta(minutes=int(os.getenv('TOKEN_EXPIRE_TIME', 30)))
 
 # Swagger config
 SWAGGER_SETTINGS = {
@@ -282,14 +277,17 @@ SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 
-# Optional HTTPS Settings (for production)
+# Only in production
 if not DEBUG:
-    SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True  # Redirects all HTTP requests to HTTPS
+    SESSION_COOKIE_SECURE = True  # Only sends cookies over HTTPS
+    CSRF_COOKIE_SECURE = True  # Only sends CSRF tokens over HTTPS
+    SECURE_HSTS_SECONDS = 31536000  # Instructs browsers to only use HTTPS for a year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True  # Applies HSTS to all subdomains
+    SECURE_HSTS_PRELOAD = True  # Allows inclusion in browser HSTS preload lists
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # For proper HTTPS detection behind proxies
 
 # Celery Config
-# Use local Redis broker for offline mode
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['application/json']
