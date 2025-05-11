@@ -44,11 +44,11 @@ class UserLoginView(APIView):
             properties={
                 'login_input': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="Username or Email"
+                    description="Encrypted Username or Email"
                 ),
                 'password': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="User password"
+                    description="Encrypted User password"
                 )
             }
         ),
@@ -71,7 +71,6 @@ class UserLoginView(APIView):
                                         'username': openapi.Schema(type=openapi.TYPE_STRING),
                                         'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
                                         'email': openapi.Schema(type=openapi.TYPE_STRING),
-                                        'password': openapi.Schema(type=openapi.TYPE_STRING),
                                         'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
                                         'position': openapi.Schema(type=openapi.TYPE_STRING),
                                         'phone_number': openapi.Schema(type=openapi.TYPE_STRING),
@@ -87,19 +86,30 @@ class UserLoginView(APIView):
     )
     @debug_error
     def post(self, request):
-        # Extract login credentials
-        login_input = request.data.get('login_input', '').strip()
-        password = request.data.get('password', '').strip()
-
-        # Validate input fields
-        if not login_input or not password:
-            return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'Username/Email and password are required',
-                'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
         try:
+            # Extract encrypted login credentials
+            encrypted_login_input = request.data.get('login_input', '').strip()
+            encrypted_password = request.data.get('password', '').strip()
+
+            # Validate input fields
+            if not encrypted_login_input or not encrypted_password:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Username/Email and password are required',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Decrypt login input and password
+            try:
+                login_input = self.decrypt_data(encrypted_login_input)
+                password = self.decrypt_data(encrypted_password)
+            except Exception as e:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': f'Invalid encrypted data format: {str(e)}',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Attempt to authenticate user
             user = None
             if '@' in login_input:
@@ -119,10 +129,24 @@ class UserLoginView(APIView):
 
             # Validate user and password
             if user and user.check_password(password):
+                # Update user login information
+                # Check which fields exist in the model before updating
+                update_fields = ['last_login']
+
                 user.last_login = timezone.now()
-                user.last_login_attempt = timezone.now()
-                user.login_attempt = F('login_attempt') + 1  # Increment login attempts
-                user.save(update_fields=['last_login', 'last_login_attempt', 'login_attempt'])
+
+                # Check if last_login_attempt field exists
+                if hasattr(user, 'last_login_attempt'):
+                    user.last_login_attempt = timezone.now()
+                    update_fields.append('last_login_attempt')
+
+                # Check if login_attempt field exists
+                if hasattr(user, 'login_attempt'):
+                    user.login_attempt = F('login_attempt') + 1
+                    update_fields.append('login_attempt')
+
+                # Save only the fields that exist
+                user.save(update_fields=update_fields)
 
                 # Generate tokens
                 refresh = RefreshToken.for_user(user)
@@ -134,26 +158,40 @@ class UserLoginView(APIView):
                     target_user=user
                 )
 
+                # Prepare user data for response
+                user_data = {
+                    'username': user.username,
+                    'username_kh': getattr(user, 'username_kh', ''),
+                    'email': user.email,
+                    'staff_id': getattr(user, 'staff_id', ''),
+                    'position': getattr(user, 'position', ''),
+                    'phone_number': getattr(user, 'phone_number', ''),
+                    'role': getattr(user, 'role', '')
+                }
+
                 return Response({
                     'responseCode': status.HTTP_200_OK,
                     'message': 'Login successful',
                     'data': {
                         'refresh': str(refresh),
                         'access': str(refresh.access_token),
-                        'user': {
-                            'id': user.id,
-                            'username': user.username,
-                            'username_kh': user.username_kh or '',
-                            'email': user.email,
-                            'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
-                            'position': user.position or '',
-                            'phone_number': convert_to_khmer_number(user.phone_number) if user.phone_number else '',
-                            'role': user.role or ''
-                        }
+                        'user': user_data
                     }
                 }, status=status.HTTP_200_OK)
             else:
                 # Invalid credentials
+                if user:
+                    # Check which fields exist before updating
+                    update_fields = []
+
+                    if hasattr(user, 'last_login_attempt'):
+                        user.last_login_attempt = timezone.now()
+                        update_fields.append('last_login_attempt')
+
+                    # Only save if there are fields to update
+                    if update_fields:
+                        user.save(update_fields=update_fields)
+
                 return Response({
                     'responseCode': status.HTTP_401_UNAUTHORIZED,
                     'message': 'Invalid login credentials',
@@ -161,11 +199,111 @@ class UserLoginView(APIView):
                 }, status=status.HTTP_401_UNAUTHORIZED)
 
         except Exception as e:
+            # Comprehensive error logging
+            logger.error(f"Login Error: {str(e)}")
+            logger.error(f"Error Details: {traceback.format_exc()}")
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
                 'message': 'An unexpected error occurred during login',
                 'data': None
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def decrypt_data(self, encrypted_data):
+        """
+        Decrypt OpenSSL-compatible AES-256 encrypted data
+        Format: "Salted__" + 8 bytes salt + ciphertext
+        """
+        try:
+            # Get current year and month
+            current_year = datetime.now().strftime('%Y')  # Format: YYYY
+            current_month = datetime.now().strftime('%m')  # Format: MM
+
+            # Fixed template with placeholders
+            key_template = "Ajv!ndfjkhg0${current_year}g0sno%eu$rtg@nejog${current_month}"
+
+            # Replace placeholders with actual values
+            dynamic_key = key_template.replace("${current_year}", current_year).replace("${current_month}", current_month)
+
+            # First, try to decode from base64
+            try:
+                # Decode the base64 encrypted data
+                encrypted_bytes = base64.b64decode(encrypted_data)
+            except binascii.Error:
+                # If standard base64 fails, try URL-safe base64
+                encrypted_bytes = base64.urlsafe_b64decode(encrypted_data)
+
+            logger.debug(f"Decoded bytes length: {len(encrypted_bytes)}")
+
+            # Check if it's in OpenSSL format (starts with "Salted__")
+            if len(encrypted_bytes) < 16 or encrypted_bytes[:8] != b'Salted__':
+                logger.error("Not in OpenSSL format (missing 'Salted__' prefix)")
+
+                # Try to handle the case where the data might be double-encoded or formatted differently
+                if encrypted_data.startswith("U2FsdGVk"):  # Base64 of "Salted"
+                    logger.debug("Trying to handle double-encoded data")
+                    # Try to decode one more time
+                    try:
+                        encrypted_bytes = base64.b64decode(encrypted_data)
+                    except:
+                        pass
+
+                # If still not in the right format, raise error
+                if len(encrypted_bytes) < 16 or encrypted_bytes[:8] != b'Salted__':
+                    raise ValueError("Invalid encrypted format - not OpenSSL compatible")
+
+            # Extract salt (next 8 bytes after "Salted__")
+            salt = encrypted_bytes[8:16]
+            logger.debug(f"Salt (hex): {salt.hex()}")
+
+            # Extract ciphertext (everything after salt)
+            ciphertext = encrypted_bytes[16:]
+            logger.debug(f"Ciphertext length: {len(ciphertext)}")
+
+            # Derive key and IV using OpenSSL's EVP_BytesToKey
+            # This is equivalent to OpenSSL's EVP_BytesToKey with MD5, one iteration
+            # We need 48 bytes (32 for key, 16 for IV)
+            key_iv = self._openssl_kdf(dynamic_key.encode(), salt, 48)
+            key = key_iv[:32]  # First 32 bytes for the key
+            iv = key_iv[32:48]  # Next 16 bytes for the IV
+
+            # Create AES cipher in CBC mode
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+
+            # Decrypt and unpad
+            try:
+                decrypted_data = unpad(cipher.decrypt(ciphertext), AES.block_size)
+                # Return as string
+                result = decrypted_data.decode('utf-8')
+                return result
+            except ValueError as e:
+                logger.error(f"Padding error: {str(e)}")
+                # Try without unpadding (in case the frontend didn't pad properly)
+                decrypted_data = cipher.decrypt(ciphertext)
+                result = decrypted_data.decode('utf-8', errors='ignore').rstrip('\0')
+                return result
+
+        except (ValueError, binascii.Error, UnicodeDecodeError) as e:
+            logger.error(f"OpenSSL decryption error: {str(e)}")
+            raise ValueError(f"Invalid encrypted data format: {str(e)}")
+
+    def _openssl_kdf(self, password, salt, key_length):
+        """
+        Derive key using OpenSSL's EVP_BytesToKey with MD5, one iteration.
+        This is not the PBKDF2 that we typically recommend for new applications,
+        but this matches the default OpenSSL behavior.
+        """
+        from hashlib import md5
+
+        result = b''
+        prev = b''
+
+        # Keep generating key material until we have enough
+        while len(result) < key_length:
+            prev = md5(prev + password + salt).digest()
+            result += prev
+
+        # Return the desired key length
+        return result[:key_length]
 
 class UserListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -400,16 +538,16 @@ class UserRegisterView(APIView):
         operation_description="User Registration",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['email', 'password'],
+            required=['email', 'password', 'role'],
             properties={
-                'email': openapi.Schema(type=openapi.TYPE_STRING),
-                'password': openapi.Schema(type=openapi.TYPE_STRING),
-                'role': openapi.Schema(type=openapi.TYPE_STRING),
-                'sex': openapi.Schema(type=openapi.TYPE_STRING),
-                'username_kh': openapi.Schema(type=openapi.TYPE_STRING),
-                'staff_id': openapi.Schema(type=openapi.TYPE_STRING),
-                'position': openapi.Schema(type=openapi.TYPE_STRING),
-                'phone_number': openapi.Schema(type=openapi.TYPE_STRING)
+                'email': openapi.Schema(type=openapi.TYPE_STRING, description="Encrypted email"),
+                'password': openapi.Schema(type=openapi.TYPE_STRING, description="Encrypted password"),
+                'role': openapi.Schema(type=openapi.TYPE_STRING, description="Encrypted role"),
+                'sex': openapi.Schema(type=openapi.TYPE_STRING, description="Encrypted sex"),
+                'username_kh': openapi.Schema(type=openapi.TYPE_STRING, description="Encrypted Khmer username"),
+                'staff_id': openapi.Schema(type=openapi.TYPE_STRING, description="Encrypted staff ID"),
+                'position': openapi.Schema(type=openapi.TYPE_STRING, description="Encrypted position"),
+                'phone_number': openapi.Schema(type=openapi.TYPE_STRING, description="Encrypted phone number")
             }
         ),
         responses={
@@ -456,75 +594,173 @@ class UserRegisterView(APIView):
                 'data': None
             }, status=status.HTTP_403_FORBIDDEN)
 
-        # Validate role creation permissions
-        requested_role = request.data.get('role', 'USER')
-        if request.user.role == 'ADMIN' and requested_role == 'SUPERUSER':
-            return Response({
-                'responseCode': status.HTTP_403_FORBIDDEN,
-                'message': 'ADMIN cannot create SUPERUSER accounts',
-                'data': None
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        # Validate email domain and extract username
-        email = request.data.get('email', '')
-        if not email or not email.endswith('@fmis.gov.kh'):
-            return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'Invalid email. Must be a FMIS email address',
-                'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Extract username from email
-        username = email.split('@')[0]
-
-        # Add username to request data
-        request.data['username'] = username
-
         try:
+            # Create a dictionary to hold decrypted data
+            decrypted_data = {}
+
+            # Decrypt each field in the request data
+            for field, value in request.data.items():
+                if value and isinstance(value, str):
+                    try:
+                        decrypted_value = self.decrypt_data(value)
+                        decrypted_data[field] = decrypted_value
+                        logger.debug(f"Decrypted {field}: {decrypted_value}")
+                    except Exception as e:
+                        logger.error(f"Failed to decrypt {field}: {str(e)}")
+                        # If decryption fails, use the original value
+                        decrypted_data[field] = value
+                else:
+                    # For non-string or empty values, use as is
+                    decrypted_data[field] = value
+
+            # Validate role creation permissions
+            requested_role = decrypted_data.get('role', 'USER')
+            if request.user.role == 'ADMIN' and requested_role in ['SUPERUSER']:
+                return Response({
+                    'responseCode': status.HTTP_403_FORBIDDEN,
+                    'message': 'ADMIN cannot create SUPERUSER accounts',
+                    'data': None
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Validate email domain and extract username
+            email = decrypted_data.get('email', '')
+            if not email or not email.endswith('@fmis.gov.kh'):
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid email. Must be a FMIS email address',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Extract username from email
+            username = email.split('@')[0]
+
+            # Add username to decrypted data
+            decrypted_data['username'] = username
+
             # Validate and create user
-            serializer = UserSerializer(data=request.data)
+            serializer = UserSerializer(data=decrypted_data)
 
             if serializer.is_valid():
                 new_user = serializer.save()
 
-                # Prepare response data
-                response_data = {
-                    'username': username,
-                    'email': new_user.email,
-                    'role': new_user.role,
-                    'sex': new_user.sex or '',
-                    'username_kh': new_user.username_kh or '',
-                    'staff_id': new_user.staff_id or '',
-                    'position': new_user.position or '',
-                    'phone_number': new_user.phone_number or ''
-                }
-
-                # Log the user creation activity
+                # Log the user creation
                 log_activity(
                     admin_user=request.user,
-                    action='USER_REGISTER',
+                    action='USER_CREATE',
                     target_user=new_user
                 )
+
+                # Prepare response data
+                response_data = {
+                    'username': new_user.username,
+                    'email': new_user.email,
+                    'role': new_user.role,
+                    'sex': getattr(new_user, 'sex', ''),
+                    'username_kh': getattr(new_user, 'username_kh', ''),
+                    'staff_id': getattr(new_user, 'staff_id', ''),
+                    'position': getattr(new_user, 'position', ''),
+                    'phone_number': getattr(new_user, 'phone_number', '')
+                }
 
                 return Response({
                     'responseCode': status.HTTP_201_CREATED,
                     'message': 'User registered successfully',
                     'data': response_data
                 }, status=status.HTTP_201_CREATED)
-
-            # Handle validation errors
-            return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'Validation error',
-                'data': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Validation error',
+                    'data': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
+            logger.error(f"User registration error: {str(e)}")
+            logger.error(f"Error details: {traceback.format_exc()}")
             return Response({
                 'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': 'Registration failed',
-                'data': str(e)
+                'message': f'Registration failed: {str(e)}',
+                'data': None
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def decrypt_data(self, encrypted_data):
+        """
+        Decrypt OpenSSL-compatible AES-256 encrypted data
+        Format: "Salted__" + 8 bytes salt + ciphertext
+        """
+        try:
+            # Get current year and month
+            current_year = datetime.now().strftime('%Y')  # Format: YYYY
+            current_month = datetime.now().strftime('%m')  # Format: MM
+
+            # Fixed template with placeholders
+            key_template = "Ajv!ndfjkhg0${current_year}g0sno%eu$rtg@nejog${current_month}"
+
+            # Replace placeholders with actual values
+            dynamic_key = key_template.replace("${current_year}", current_year).replace("${current_month}", current_month)
+
+            # Decode the base64 encrypted data
+            try:
+                # Decode the base64 encrypted data
+                encrypted_bytes = base64.b64decode(encrypted_data)
+            except binascii.Error:
+                # If standard base64 fails, try URL-safe base64
+                encrypted_bytes = base64.urlsafe_b64decode(encrypted_data)
+
+            # Check if it's in OpenSSL format (starts with "Salted__")
+            if len(encrypted_bytes) < 16 or encrypted_bytes[:8] != b'Salted__':
+                logger.error("Not in OpenSSL format (missing 'Salted__' prefix)")
+                raise ValueError("Invalid encrypted format - not OpenSSL compatible")
+
+            # Extract salt (next 8 bytes after "Salted__")
+            salt = encrypted_bytes[8:16]
+
+            # Extract ciphertext (everything after salt)
+            ciphertext = encrypted_bytes[16:]
+
+            # Derive key and IV using OpenSSL's EVP_BytesToKey
+            # This is equivalent to OpenSSL's EVP_BytesToKey with MD5, one iteration
+            # We need 48 bytes (32 for key, 16 for IV)
+            key_iv = self._openssl_kdf(dynamic_key.encode(), salt, 48)
+            key = key_iv[:32]  # First 32 bytes for the key
+            iv = key_iv[32:48]  # Next 16 bytes for the IV
+
+            # Create AES cipher in CBC mode
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+
+            # Decrypt and unpad
+            try:
+                decrypted_data = unpad(cipher.decrypt(ciphertext), AES.block_size)
+                # Return as string
+                return decrypted_data.decode('utf-8')
+            except ValueError as e:
+                logger.error(f"Padding error: {str(e)}")
+                # Try without unpadding (in case the frontend didn't pad properly)
+                decrypted_data = cipher.decrypt(ciphertext)
+                return decrypted_data.decode('utf-8', errors='ignore').rstrip('\0')
+
+        except (ValueError, binascii.Error, UnicodeDecodeError) as e:
+            logger.error(f"OpenSSL decryption error: {str(e)}")
+            raise ValueError(f"Invalid encrypted data format: {str(e)}")
+
+    def _openssl_kdf(self, password, salt, key_length):
+        """
+        Derive key using OpenSSL's EVP_BytesToKey with MD5, one iteration.
+        This is not the PBKDF2 that we typically recommend for new applications,
+        but this matches the default OpenSSL behavior.
+        """
+        from hashlib import md5
+
+        result = b''
+        prev = b''
+
+        # Keep generating key material until we have enough
+        while len(result) < key_length:
+            prev = md5(prev + password + salt).digest()
+            result += prev
+
+        # Return the desired key length
+        return result[:key_length]
 
 class UserDropView(APIView):
     permission_classes = [IsAuthenticated]
@@ -2171,100 +2407,239 @@ class ChangePasswordView(APIView):
             properties={
                 'current_password': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="Current password"
+                    description="Current password (encrypted)"
                 ),
                 'new_password': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="New password"
+                    description="New password (encrypted)"
                 ),
                 'confirm_password': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="Confirm new password"
+                    description="Confirm new password (encrypted)"
                 )
             }
         ),
         responses={
             200: openapi.Response(
-                description='Password Changed Successfully',
+                description="Password changed successfully",
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
                         'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
                         'message': openapi.Schema(type=openapi.TYPE_STRING),
-                        'data': openapi.Schema(type=openapi.TYPE_OBJECT, nullable=True)
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
                     }
                 )
             ),
-            400: 'Validation Error',
-            401: 'Current Password Incorrect'
+            400: openapi.Response(
+                description="Bad request",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'responseCode': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'message': openapi.Schema(type=openapi.TYPE_STRING),
+                        'data': openapi.Schema(type=openapi.TYPE_OBJECT)
+                    }
+                )
+            )
         }
     )
     @debug_error
     def post(self, request):
-        user = request.user
-        current_password = request.data.get('current_password')
-        new_password = request.data.get('new_password')
-        confirm_password = request.data.get('confirm_password')
-
-        # Validate input
-        if not all([current_password, new_password, confirm_password]):
-            return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'All password fields are required',
-                'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check if current password is correct
-        if not user.check_password(current_password):
-            return Response({
-                'responseCode': status.HTTP_401_UNAUTHORIZED,
-                'message': 'current_password is incorrect',
-                'data': None
-            }, status=status.HTTP_401_UNAUTHORIZED)
-
-        # Check if new passwords match
-        if new_password != confirm_password:
-            return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'confirm_password do not match',
-                'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check if new password is different from current password
-        if current_password == new_password:
-            return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': 'new_password must be different from current_password',
-                'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Validate password complexity using the same validator as registration
         try:
-            # Using the PasswordValidator from serializers.py [1][2]
-            PasswordValidator.validate_password(new_password)
-        except serializers.ValidationError as e:
+            # Extract encrypted password fields
+            encrypted_current_password = request.data.get('current_password', '')
+            encrypted_new_password = request.data.get('new_password', '')
+            encrypted_confirm_password = request.data.get('confirm_password', '')
+
+            # Validate input fields
+            if not encrypted_current_password or not encrypted_new_password:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Current password and new password are required',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Decrypt password fields
+            try:
+                current_password = self.decrypt_data(encrypted_current_password)
+                new_password = self.decrypt_data(encrypted_new_password)
+                confirm_password = self.decrypt_data(encrypted_confirm_password) if encrypted_confirm_password else None
+
+                logger.debug("Successfully decrypted password fields")
+            except Exception as e:
+                logger.error(f"Password decryption failed: {str(e)}")
+                logger.error(f"Decryption error details: {traceback.format_exc()}")
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid encrypted password format',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validate that new password and confirm password match
+            if confirm_password and new_password != confirm_password:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'confirm_password New password and confirm password do not match',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Get the current user
+            user = request.user
+
+            # Check if the current password is correct
+            if not user.check_password(current_password):
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'current_password Current password is incorrect',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validate new password complexity
+            if len(new_password) < 8:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'new_password Password must be at least 8 characters long',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check for at least one lowercase letter
+            if not any(c.islower() for c in new_password):
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'new_password Password must contain at least one lowercase letter',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check for at least one uppercase letter
+            if not any(c.isupper() for c in new_password):
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'new_password Password must contain at least one uppercase letter',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check for at least one digit
+            if not any(c.isdigit() for c in new_password):
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'new_password Password must contain at least one digit',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check for at least one special character
+            if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in new_password):
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'new_password Password must contain at least one special character',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Set the new password
+            user.set_password(new_password)
+            user.save()
+
+            # Log the password change
+            log_activity(
+                admin_user=user,
+                action='PASSWORD_CHANGE',
+                target_user=user
+            )
+
+            # Return success response
             return Response({
-                'responseCode': status.HTTP_400_BAD_REQUEST,
-                'message': str(e.detail[0]) if isinstance(e.detail, list) else str(e.detail),
+                'responseCode': status.HTTP_200_OK,
+                'message': 'Password changed successfully',
                 'data': None
-            }, status=status.HTTP_400_BAD_REQUEST)
+            }, status=status.HTTP_200_OK)
 
-        # Set new password
-        user.set_password(new_password)
-        user.save()
+        except Exception as e:
+            logger.error(f"Change password error: {str(e)}")
+            logger.error(f"Error details: {traceback.format_exc()}")
+            return Response({
+                'responseCode': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': f'An error occurred: {str(e)}',
+                'data': None
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Log the password change activity
-        log_activity(
-            admin_user=request.user,
-            action='USER_PASSWORD_CHANGE',
-            target_user=request.user
-        )
+    def decrypt_data(self, encrypted_data):
+        """
+        Decrypt OpenSSL-compatible AES-256 encrypted data
+        Format: "Salted__" + 8 bytes salt + ciphertext
+        """
+        try:
+            # Get current year and month
+            current_year = datetime.now().strftime('%Y')  # Format: YYYY
+            current_month = datetime.now().strftime('%m')  # Format: MM
 
-        return Response({
-            'responseCode': status.HTTP_200_OK,
-            'message': 'Password changed successfully',
-            'data': None
-        })
+            # Fixed template with placeholders
+            key_template = "Ajv!ndfjkhg0${current_year}g0sno%eu$rtg@nejog${current_month}"
+
+            # Replace placeholders with actual values
+            dynamic_key = key_template.replace("${current_year}", current_year).replace("${current_month}", current_month)
+
+            # Decode the base64 encrypted data
+            try:
+                # Decode the base64 encrypted data
+                encrypted_bytes = base64.b64decode(encrypted_data)
+            except binascii.Error:
+                # If standard base64 fails, try URL-safe base64
+                encrypted_bytes = base64.urlsafe_b64decode(encrypted_data)
+
+            # Check if it's in OpenSSL format (starts with "Salted__")
+            if len(encrypted_bytes) < 16 or encrypted_bytes[:8] != b'Salted__':
+                logger.error("Not in OpenSSL format (missing 'Salted__' prefix)")
+                raise ValueError("Invalid encrypted format - not OpenSSL compatible")
+
+            # Extract salt (next 8 bytes after "Salted__")
+            salt = encrypted_bytes[8:16]
+
+            # Extract ciphertext (everything after salt)
+            ciphertext = encrypted_bytes[16:]
+
+            # Derive key and IV using OpenSSL's EVP_BytesToKey
+            # This is equivalent to OpenSSL's EVP_BytesToKey with MD5, one iteration
+            # We need 48 bytes (32 for key, 16 for IV)
+            key_iv = self._openssl_kdf(dynamic_key.encode(), salt, 48)
+            key = key_iv[:32]  # First 32 bytes for the key
+            iv = key_iv[32:48]  # Next 16 bytes for the IV
+
+            # Create AES cipher in CBC mode
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+
+            # Decrypt and unpad
+            try:
+                decrypted_data = unpad(cipher.decrypt(ciphertext), AES.block_size)
+                # Return as string
+                return decrypted_data.decode('utf-8')
+            except ValueError as e:
+                logger.error(f"Padding error: {str(e)}")
+                # Try without unpadding (in case the frontend didn't pad properly)
+                decrypted_data = cipher.decrypt(ciphertext)
+                return decrypted_data.decode('utf-8', errors='ignore').rstrip('\0')
+
+        except (ValueError, binascii.Error, UnicodeDecodeError) as e:
+            logger.error(f"OpenSSL decryption error: {str(e)}")
+            raise ValueError(f"Invalid encrypted data format: {str(e)}")
+
+    def _openssl_kdf(self, password, salt, key_length):
+        """
+        Derive key using OpenSSL's EVP_BytesToKey with MD5, one iteration.
+        This is not the PBKDF2 that we typically recommend for new applications,
+        but this matches the default OpenSSL behavior.
+        """
+        from hashlib import md5
+
+        result = b''
+        prev = b''
+
+        # Keep generating key material until we have enough
+        while len(result) < key_length:
+            prev = md5(prev + password + salt).digest()
+            result += prev
+
+        # Return the desired key length
+        return result[:key_length]
 
 class UserActivityLogView(APIView):
     permission_classes = [IsAuthenticated]

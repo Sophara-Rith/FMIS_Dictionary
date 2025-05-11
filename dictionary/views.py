@@ -132,7 +132,7 @@ class DictionaryEntryListView(APIView):
                 openapi.IN_QUERY,
                 description="Number of entries per page",
                 type=openapi.TYPE_INTEGER,
-                default=100
+                default=25
             ),
             openapi.Parameter(
                 'language',
@@ -178,7 +178,7 @@ class DictionaryEntryListView(APIView):
         try:
             # Get query parameters with defaults
             page = max(1, int(request.query_params.get('page', 1)))
-            per_page = max(1, min(int(request.query_params.get('per_page', 100)), 500))
+            per_page = max(1, int(request.query_params.get('per_page', 50)))
             language = request.query_params.get('language')
             search = request.query_params.get('search')
 
@@ -451,7 +451,7 @@ class DictionarySearchView(APIView):
                 in_=openapi.IN_QUERY,
                 type=openapi.TYPE_INTEGER,
                 description='Number of results per page',
-                default=10
+                default=25
             )
         ],
         responses={
@@ -519,7 +519,7 @@ class DictionarySearchView(APIView):
             language = request.query_params.get('language', 'ALL')
             search_fields = request.query_params.getlist('search_fields') or self.DEFAULT_SEARCH_FIELDS
             page = max(1, int(request.query_params.get('page', 1)))
-            per_page = max(1, int(request.query_params.get('per_page', 10)))
+            per_page = max(1, int(request.query_params.get('per_page', 50)))
 
             # Validate input
             if not query:
@@ -851,7 +851,7 @@ class StagingEntryListView(APIView):
                 openapi.IN_QUERY,
                 description="Entries per page",
                 type=openapi.TYPE_INTEGER,
-                default=30000
+                default=50
             ),
             openapi.Parameter(
                 'review_status',
@@ -869,7 +869,7 @@ class StagingEntryListView(APIView):
         # Validate and convert page and per_page
         try:
             page = max(1, int(request.query_params.get('page', 1)))
-            per_page = max(1, int(request.query_params.get('per_page', 30000)))
+            per_page = max(1, int(request.query_params.get('per_page', 50)))
             review_status = request.query_params.get('review_status')
         except ValueError:
             return Response({
@@ -2803,6 +2803,8 @@ class DictionarySyncAllView(APIView):
         try:
             # Get device ID from headers
             device_id = request.headers.get('X-Device-ID')
+            page = max(1, int(request.GET.get('page', 1)))
+            per_page = max(1, int(request.GET.get('per_page', 50)))
 
             # Validate device ID
             if not device_id:
@@ -2811,10 +2813,6 @@ class DictionarySyncAllView(APIView):
                     'message': 'Device ID is required',
                     'data': None
                 }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Pagination parameters
-            page = max(1, int(request.GET.get('page', 1)))
-            per_page = max(1, min(int(request.GET.get('per_page', 100)), 80000))
 
             # Get all bookmarked word IDs for this device in one query
             bookmarked_ids = set(Bookmark.objects.filter(device_id=device_id)
