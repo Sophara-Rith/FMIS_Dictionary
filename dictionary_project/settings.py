@@ -17,7 +17,20 @@ MOBILE_DEFAULT_PASSWORD = os.getenv('MOBILE_DEFAULT_PASSWORD')
 
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS','').split(',')
+CORS_ALLOW_ALL_ORIGINS = True   #Develop stage only
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8012",
+    "http://127.0.0.1:8012",
+    "https://tops-dolphin-able.ngrok-free.app"
+]
+CORS_PREFLIGHT_MAX_AGE = 86400
+
+# ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS','').split(',')
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '172.23.23.48', 'tops-dolphin-able.ngrok-free.app']
 
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -40,16 +53,6 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
     'contenttype',
 ]
-
-# CORS_ALLOW_ALL_ORIGINS = True   #Develop stage only
-CORS_ALLOW_CREDENTIALS = True
-
-# CORS Configuration
-def clean_cors_origins(origins_string):
-    origins = origins_string.split(',')
-    return [origin.strip().split('#')[0].strip() for origin in origins if origin.strip()]
-
-CORS_ALLOWED_ORIGINS = clean_cors_origins(os.getenv('CORS_ALLOWED_ORIGINS', ''))
 
 # Custom user model
 AUTH_USER_MODEL = 'users.User'
@@ -155,9 +158,12 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': os.getenv('ANON_RATE', '500/hour'),
-        'user': os.getenv('USER_RATE', '700/hour'),
-        'search': os.getenv('SEARCH', '100/minute')
+        # 'anon': os.getenv('ANON_RATE', '500/hour'),
+        # 'user': os.getenv('USER_RATE', '700/hour'),
+        # 'search': os.getenv('SEARCH', '100/minute')
+        'anon': None,
+        'user': None,
+        'search': None
     }
 }
 
@@ -278,14 +284,14 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 
 # Only in production
-if not DEBUG:
-    SECURE_SSL_REDIRECT = True  # Redirects all HTTP requests to HTTPS
-    SESSION_COOKIE_SECURE = True  # Only sends cookies over HTTPS
-    CSRF_COOKIE_SECURE = True  # Only sends CSRF tokens over HTTPS
-    SECURE_HSTS_SECONDS = 31536000  # Instructs browsers to only use HTTPS for a year
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True  # Applies HSTS to all subdomains
-    SECURE_HSTS_PRELOAD = True  # Allows inclusion in browser HSTS preload lists
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # For proper HTTPS detection behind proxies
+# if not DEBUG:
+#     SECURE_SSL_REDIRECT = True  # Redirects all HTTP requests to HTTPS
+#     SESSION_COOKIE_SECURE = True  # Only sends cookies over HTTPS
+#     CSRF_COOKIE_SECURE = True  # Only sends CSRF tokens over HTTPS
+#     SECURE_HSTS_SECONDS = 31536000  # Instructs browsers to only use HTTPS for a year
+#     SECURE_HSTS_INCLUDE_SUBDOMAINS = True  # Applies HSTS to all subdomains
+#     SECURE_HSTS_PRELOAD = True  # Allows inclusion in browser HSTS preload lists
+#     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # For proper HTTPS detection behind proxies
 
 # Celery Config
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')

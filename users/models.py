@@ -53,7 +53,7 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email, password=None, **extra_fields):
+    def create_superuser(self, username, email, password=None, **extra_fields):
         # Set default values for superuser
         extra_fields.setdefault('role', 'SUPERUSER')
         extra_fields.setdefault('is_staff', True)
@@ -71,7 +71,7 @@ class UserManager(BaseUserManager):
             raise ValueError('Superuser must have is_superuser=True')
 
         # Use create_user method to create the superuser
-        return self.create_user(email, password, **extra_fields)
+        return self.create_user(username, email, password, **extra_fields)
 
     def get_queryset(self):
         # Override default queryset to exclude soft-deleted users

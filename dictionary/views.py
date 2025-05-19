@@ -859,12 +859,20 @@ class StagingEntryListView(APIView):
                 description="Filter by review status",
                 type=openapi.TYPE_STRING,
                 required=False
+            ),
+            openapi.Parameter(
+                'search',
+                openapi.IN_QUERY,
+                description="Smart search for words (automatically detects Khmer or English)",
+                type=openapi.TYPE_STRING,
+                required=False
             )
         ]
     )
     def get(self, request):
         # Get query parameters
         user_id = request.query_params.get('id')
+        search_term = request.query_params.get('search', '').strip()
 
         # Validate and convert page and per_page
         try:
@@ -913,21 +921,24 @@ class StagingEntryListView(APIView):
             # Fetch staging entries for the specific user
             staging_entries = Staging.objects.filter(created_by_id=user_id).order_by('-created_at')
 
-            # Apply review_status filter
+            # Apply filter
             if review_status:
-                entries = entries.filter(review_status=review_status)
+                staging_entries = staging_entries.filter(review_status=review_status)
+
+            if search_term:
+                # Check if the search term contains Khmer characters
+                is_khmer = any(0x1780 <= ord(char) <= 0x17FF for char in search_term)
+
+                if is_khmer:
+                    # Search in Khmer words
+                    staging_entries = staging_entries.filter(word_kh__icontains=search_term)
+                else:
+                    # Search in English words
+                    staging_entries = staging_entries.filter(word_en__icontains=search_term)
 
         # Manual Pagination
         total_entries = staging_entries.count()
         total_pages = (total_entries + per_page - 1) // per_page
-
-        # Check if requested page is out of range
-        if page > total_pages and total_pages > 0:
-            return Response({
-                'responseCode': status.HTTP_404_NOT_FOUND,
-                'message': 'Page number out of range',
-                'data': None
-            }, status=status.HTTP_404_NOT_FOUND)
 
         # Apply pagination
         start = (page - 1) * per_page
@@ -943,9 +954,9 @@ class StagingEntryListView(APIView):
             'data': {
                 'entries': serializer.data,
                 'total_entries': total_entries,
-                'total_pages': total_pages,
-                'current_page': page,
-                'per_page': per_page
+                'page': page,
+                'per_page': per_page,
+                'total_pages': total_pages
             }
         })
 

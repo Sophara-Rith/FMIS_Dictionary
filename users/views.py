@@ -160,6 +160,7 @@ class UserLoginView(APIView):
 
                 # Prepare user data for response
                 user_data = {
+                    'id': user.id,
                     'username': user.username,
                     'username_kh': getattr(user, 'username_kh', ''),
                     'email': user.email,
@@ -309,7 +310,44 @@ class UserListView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="View list of all users without pagination",
+        operation_description="View list of users with pagination",
+        manual_parameters=[
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'per_page',
+                openapi.IN_QUERY,
+                description="Users per page",
+                type=openapi.TYPE_INTEGER,
+                default=25
+            ),
+            openapi.Parameter(
+                'role',
+                openapi.IN_QUERY,
+                description="Filter by user role",
+                type=openapi.TYPE_STRING,
+                required=False
+            ),
+            openapi.Parameter(
+                'is_active',
+                openapi.IN_QUERY,
+                description="Filter by active status (true/false)",
+                type=openapi.TYPE_STRING,
+                required=False
+            ),
+            openapi.Parameter(
+                'is_suspended',
+                openapi.IN_QUERY,
+                description="Filter by suspension status (true/false)",
+                type=openapi.TYPE_STRING,
+                required=False
+            )
+        ],
         responses={
             200: openapi.Response(
                 description='Users retrieved successfully',
@@ -338,6 +376,15 @@ class UserListView(APIView):
                                             'is_suspended': openapi.Schema(type=openapi.TYPE_INTEGER, description='0: Not Suspended, 1: Suspended')
                                         }
                                     )
+                                ),
+                                'pagination': openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'total_users': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                        'page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                        'per_page': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                        'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER)
+                                    }
                                 )
                             }
                         )
@@ -376,16 +423,27 @@ class UserListView(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         try:
+            # Get pagination parameters
+            try:
+                page = max(1, int(request.query_params.get('page', 1)))
+                per_page = max(1, int(request.query_params.get('per_page', 50)))
+            except ValueError:
+                return Response({
+                    'responseCode': status.HTTP_400_BAD_REQUEST,
+                    'message': 'Invalid pagination parameters',
+                    'data': None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Optional filtering parameters
             role = request.query_params.get('role')
             is_active = request.query_params.get('is_active')
             is_suspended = request.query_params.get('is_suspended')
 
-            # Base queryset with soft delete filter and exclude specific email
+            # Base queryset with soft delete filter
             users = User.objects.filter(is_deleted=False)
 
             if request.user.role == 'ADMIN':
-                # ADMIN users cannot see SUPERUSER accounts or the specific email
+                # ADMIN users cannot see SUPERUSER accounts or MOBILE accounts
                 users = users.exclude(role='SUPERUSER').exclude(role='MOBILE')
 
             # Apply additional filters if provided
@@ -395,7 +453,19 @@ class UserListView(APIView):
             if is_active is not None:
                 users = users.filter(is_active=is_active.lower() == 'true')
 
-            # Transform data - return all non-deleted users without pagination
+            if is_suspended is not None:
+                users = users.filter(is_suspended=is_suspended.lower() == 'true')
+
+            # Calculate pagination values
+            total_users = users.count()
+            total_pages = (total_users + per_page - 1) // per_page
+
+            # Apply pagination
+            start = (page - 1) * per_page
+            end = start + per_page
+            paginated_users = users[start:end]
+
+            # Transform data
             user_data = [{
                 'id': user.id,
                 'staff_id': convert_to_khmer_number(user.staff_id) if user.staff_id else '',
@@ -407,15 +477,19 @@ class UserListView(APIView):
                 'date_joined': convert_to_khmer_date(user.date_joined.strftime('%d-%m-%Y')) if user.date_joined else '',
                 'role': user.role,
                 'is_suspended': 1 if user.is_suspended else 0,
-                'suspended_reason': user.suspension_reason,
-                'suspended_at': user.suspended_at
-            } for user in users]
+                'suspended_reason': user.suspension_reason or '',
+                'suspended_at': user.suspended_at.isoformat() if user.suspended_at else ''
+            } for user in paginated_users]
 
             return Response({
                 'responseCode': status.HTTP_200_OK,
                 'message': 'Users retrieved successfully',
                 'data': {
-                    'users': user_data
+                    'users': user_data,
+                    'total_entries': total_users,
+                    'current_page': page,
+                    'per_page': per_page,
+                    'total_pages': total_pages
                 }
             })
 
@@ -1503,8 +1577,8 @@ class UserSuspendView(APIView):
             log_activity(
                 admin_user=request.user,
                 action='USER_SUSPENDED',
-                target_user=user,
-                details=f"Reason: {reason}"
+                target_user=user
+                # details=f"Reason: {reason}"
             )
 
             return Response({
@@ -1651,8 +1725,8 @@ class UserUnsuspendView(APIView):
             log_activity(
                 admin_user=request.user,
                 action='USER_UNSUSPENDED',
-                target_user=user,
-                details=f"Reason: {reason}"
+                target_user=user
+                # action_details=f"Reason: {reason}"
             )
 
             return Response({
